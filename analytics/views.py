@@ -9,11 +9,11 @@ from inventory.models import Product
 
 
 class AnalyticsView(APIView):
-    permission_classes = [IsAuthenticated]  # Optional: Restrict access to logged-in users
+    # permission_classes = [IsAuthenticated]  # Optional: Restrict access to logged-in users
 
     def get(self, request):
-        current_month = now().month
-        current_year = now().year
+        current_month = 12
+        current_year = now().year - 1
 
         # 1. Inventory Bought This Month
         inventory_bought_this_month = Product.objects.filter(

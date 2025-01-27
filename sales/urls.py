@@ -6,6 +6,6 @@ router = DefaultRouter()
 router.register(r'', SaleViewSet)
 
 urlpatterns = [
-    path('/', include(router.urls)),
-    path('/unshipped/', include(router.urls)),
+    path('', include(router.urls)),
+    path('unshipped/', include(router.urls)),
 ]
