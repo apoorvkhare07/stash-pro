@@ -12,13 +12,14 @@ class AnalyticsView(APIView):
     # permission_classes = [IsAuthenticated]  # Optional: Restrict access to logged-in users
 
     def get(self, request):
-        current_month = 12
-        current_year = now().year - 1
+        current_month = now().month
+        current_year = now().year
 
         # 1. Inventory Bought This Month
         inventory_bought_this_month = Product.objects.filter(
-            created_at__month=current_month,
-            created_at__year=current_year
+            bought_at__month=current_month
+        ).filter(
+            bought_at__year=current_year
         ).aggregate(total_value=Sum(F('stock') * F('price')))['total_value'] or 0
 
         # 2. Sales This Month
@@ -58,7 +59,7 @@ class AnalyticsView(APIView):
         total_expenses = shipping_expenses + servicing_expenses + miscellaneous_expenses
 
         # 5. Profit This Month
-        profit_this_month = sales_this_month - total_expenses
+        profit_this_month = sales_this_month - cogs_this_month
 
         # Prepare Response Data
         data = {
@@ -67,6 +68,7 @@ class AnalyticsView(APIView):
             "cost_of_goods_sold_this_month": cogs_this_month,
             "total_unsold_inventory": total_unsold_inventory,
             "profit_this_month": profit_this_month,
+            "profit_margin_this_month": (profit_this_month / cogs_this_month if cogs_this_month else 0)*100,
             "expenses_this_month": {
                 "shipping": shipping_expenses,
                 "servicing": servicing_expenses,
