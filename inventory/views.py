@@ -1,8 +1,8 @@
 import datetime
 from rest_framework.decorators import action
 from rest_framework import viewsets, status
-from .models import Product, Lot
-from .serializers import ProductSerializer, LotSerializer
+from .models import Product, Lot, Payment
+from .serializers import ProductSerializer, LotSerializer, PaymentSerializer
 from rest_framework.response import Response
 from sales.models import Sale
 from django_filters import rest_framework as filters
@@ -98,3 +98,27 @@ class LotViewSet(viewsets.ModelViewSet):
         self.perform_create(serializer)
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class PaymentViewSet(viewsets.ModelViewSet):
+    queryset = Payment.objects.all()
+    serializer_class = PaymentSerializer
+    
+    def get_queryset(self):
+        queryset = Payment.objects.all()
+        # Filter by lot if provided
+        lot_id = self.request.query_params.get('lot', None)
+        if lot_id:
+            queryset = queryset.filter(lot=lot_id)
+        return queryset
+    
+    def create(self, request, *args, **kwargs):
+        try:
+            serializer = self.get_serializer(data=request.data)
+            print(request.data)
+            serializer.is_valid(raise_exception=True)
+            self.perform_create(serializer)
+            headers = self.get_success_headers(serializer.data)
+            return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)

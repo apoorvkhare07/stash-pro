@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Product, Lot
+from .models import Product, Lot, Payment
 from decimal import Decimal
 import datetime
 
@@ -121,4 +121,32 @@ class LotSerializer(serializers.ModelSerializer):
             return price
         except (ValueError, TypeError):
             raise serializers.ValidationError("Invalid total price format")
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    lot_title = serializers.CharField(source='lot.title', read_only=True)
+    payment_date = serializers.DateField(format="%Y-%m-%d")
+
+    class Meta:
+        model = Payment
+        fields = "__all__"
+        read_only_fields = ('created_at', 'updated_at')
+
+    def validate_amount(self, value):
+        if value is None:
+            raise serializers.ValidationError("Amount is required")
+        try:
+            amount = Decimal(str(value))
+            if amount <= 0:
+                raise serializers.ValidationError("Amount must be greater than 0")
+            return amount
+        except (ValueError, TypeError):
+            raise serializers.ValidationError("Invalid amount format")
+
+    def validate(self, data):
+        if not data.get('lot'):
+            raise serializers.ValidationError({"lot": "Lot is required"})
+        if not data.get('payment_date'):
+            raise serializers.ValidationError({"payment_date": "Payment date is required"})
+        return data
 

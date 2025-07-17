@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Sum
 from django.utils.translation import gettext_lazy as _
 
 
@@ -90,13 +91,56 @@ class Product(BaseModel):
 
 
 class Lot(BaseModel):
+    class PaymentStatus(models.TextChoices):
+        PAYMENT_PENDING = "payment_pending", _("Payment Pending")
+        PARTIALLY_PAID = "partially_paid", _("Partially Paid")
+        PAID = "paid", _("Paid")
+
     title = models.CharField(max_length=255)
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
     bought_on = models.DateField()
     bought_from = models.CharField(max_length=255, null=True, blank=True)
     paid_on = models.DateField(null=True, blank=True)
+    status = models.CharField(
+        max_length=50,
+        choices=PaymentStatus.choices,
+        default=PaymentStatus.PAYMENT_PENDING
+    )
 
     def __str__(self):
         return f"{self.title} - {self.bought_on}"
+
+    def get_total_payments(self):
+        """Calculate total amount paid for this lot"""
+        return self.payments.aggregate(total=Sum('amount'))['total'] or 0
+
+    def update_payment_status(self):
+        """Update payment status based on total payments"""
+        total_paid = self.get_total_payments()
+        
+        if total_paid == 0:
+            self.status = self.PaymentStatus.PAYMENT_PENDING
+        elif total_paid < self.total_price:
+            self.status = self.PaymentStatus.PARTIALLY_PAID
+        else:
+            self.status = self.PaymentStatus.PAID
+        
+        self.save()
+
+
+class Payment(BaseModel):
+    lot = models.ForeignKey(Lot, on_delete=models.CASCADE, related_name='payments')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_date = models.DateField()
+    payment_method = models.CharField(max_length=100, null=True, blank=True)
+    notes = models.TextField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Payment of {self.amount} for {self.lot.title} on {self.payment_date}"
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Update lot payment status whenever a payment is saved
+        self.lot.update_payment_status()
 
 
