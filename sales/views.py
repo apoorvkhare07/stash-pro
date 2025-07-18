@@ -1,5 +1,5 @@
 from rest_framework.decorators import action
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from .models import Sale
 from .serializers import SaleSerializer
 from rest_framework.response import Response
@@ -82,5 +82,42 @@ class SaleViewSet(viewsets.ModelViewSet):
             })
 
         return Response(response_data)
+
+    @action(detail=True, methods=["patch"])
+    def update_shipping_status(self, request, pk=None):
+        """
+        Update the shipping status of a specific sale item.
+        """
+        try:
+            sale = self.get_object()
+            new_status = request.data.get('shipping_status')
+            
+            if not new_status:
+                return Response(
+                    {"error": "shipping_status is required"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Validate the shipping status choice
+            valid_statuses = [choice[0] for choice in Sale.ShippingStatus.choices]
+            if new_status not in valid_statuses:
+                return Response(
+                    {"error": f"Invalid shipping status. Valid options are: {', '.join(valid_statuses)}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Update the shipping status
+            sale.shipping_status = new_status
+            sale.save()
+            
+            # Return the updated sale
+            serializer = self.get_serializer(sale)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 

@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Sum, F
 from sales.models import Sale
-from expense.models import ShippingExpense, ServicingExpense, MiscellaneousExpense
+from expense.models import Expenses
 from inventory.models import Product
 
 
@@ -41,22 +41,11 @@ class AnalyticsView(APIView):
         )['total_value'] or 0
 
         # 4. Expenses This Month
-        shipping_expenses = ShippingExpense.objects.filter(
+        total_expenses = Expenses.objects.filter(
             date__month=current_month,
             date__year=current_year
-        ).aggregate(total=Sum('cost'))['total'] or 0
+        ).aggregate(total=Sum('amount'))['total'] or 0
 
-        servicing_expenses = ServicingExpense.objects.filter(
-            date__month=current_month,
-            date__year=current_year
-        ).aggregate(total=Sum('cost'))['total'] or 0
-
-        miscellaneous_expenses = MiscellaneousExpense.objects.filter(
-            date__month=current_month,
-            date__year=current_year
-        ).aggregate(total=Sum('cost'))['total'] or 0
-
-        total_expenses = shipping_expenses + servicing_expenses + miscellaneous_expenses
 
         # 5. Profit This Month
         profit_this_month = sales_this_month - cogs_this_month
@@ -69,12 +58,7 @@ class AnalyticsView(APIView):
             "total_unsold_inventory": total_unsold_inventory,
             "profit_this_month": profit_this_month,
             "profit_margin_this_month": (profit_this_month / cogs_this_month if cogs_this_month else 0)*100,
-            "expenses_this_month": {
-                "shipping": shipping_expenses,
-                "servicing": servicing_expenses,
-                "miscellaneous": miscellaneous_expenses,
-                "overall": total_expenses,
-            },
+            "expenses_this_month":  total_expenses,
         }
 
         return Response(data)

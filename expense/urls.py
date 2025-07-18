@@ -1,11 +1,9 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import ShippingExpenseViewSet, ServicingExpenseViewSet, MiscellaneousExpenseViewSet
+from .views import ExpensesViewSet
 
 router = DefaultRouter()
-router.register(r'shipping', ShippingExpenseViewSet)
-router.register(r'servicing', ServicingExpenseViewSet)
-router.register(r'miscellaneous', MiscellaneousExpenseViewSet)
+router.register(r'', ExpensesViewSet, basename='expenses')
 
 urlpatterns = [
     path('', include(router.urls)),

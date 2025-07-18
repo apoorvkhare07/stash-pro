@@ -150,3 +150,6 @@ secrets.json
 
 *.csv
 scratch.py
+
+scratch/
+scratch/*

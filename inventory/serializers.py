@@ -99,7 +99,7 @@ class ProductSerializer(serializers.ModelSerializer):
 class ProductTitleSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
-        fields = ("id", "name")
+        fields = ("id", "name", "price")
 
 
 class LotSerializer(serializers.ModelSerializer):
