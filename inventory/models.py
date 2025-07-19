@@ -21,12 +21,14 @@ class Product(BaseModel):
         FILM = "Film", _("Film")
 
     class SubCategory(models.TextChoices):
-        DSLR = "DSLR", _("DSLR")
+        SLR = "SLR", _("SLR")
         POINT_AND_SHOOT = "Point & Shoot", _("Point & Shoot")
         MIRRORLESS = "Mirrorless", _("Mirrorless")
         TRIPOD = "Tripod", _("Tripod")
         LENS = "Lens", _("Lens")
         FILM_ROLL = "Film Roll", _("Film Roll")
+        RANGEFINDER = "Rangefinder", _("Rangefinder")
+        TLR = "TLR", _("TLR")
 
     class CosmeticCondition(models.TextChoices):
         EXCELLENT = "excellent", _("Excellent")
