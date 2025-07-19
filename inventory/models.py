@@ -29,6 +29,7 @@ class Product(BaseModel):
         FILM_ROLL = "Film Roll", _("Film Roll")
         RANGEFINDER = "Rangefinder", _("Rangefinder")
         TLR = "TLR", _("TLR")
+        HANDYCAM = "Handycam", _("Handycam")
 
     class CosmeticCondition(models.TextChoices):
         EXCELLENT = "excellent", _("Excellent")
