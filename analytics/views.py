@@ -32,17 +32,14 @@ class AnalyticsView(APIView):
                 end_date = make_aware(datetime(last_month_year, last_month + 1, 1)) - timedelta(days=1)
                 
         elif duration == "current_year":
-            # Current year (January 1st to December 31st)
+            # Current year from January 1st to current date
             start_date = make_aware(datetime(current_date.year, 1, 1))
-            end_date = make_aware(datetime(current_date.year, 12, 31, 23, 59, 59))
+            end_date = current_date
             
         else:  # "current_month" (default)
-            # Current month
+            # Current month from 1st to current date
             start_date = make_aware(datetime(current_date.year, current_date.month, 1))
-            if current_date.month == 12:
-                end_date = make_aware(datetime(current_date.year + 1, 1, 1)) - timedelta(days=1)
-            else:
-                end_date = make_aware(datetime(current_date.year, current_date.month + 1, 1)) - timedelta(days=1)
+            end_date = current_date
         
         return start_date, end_date
 
