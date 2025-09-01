@@ -12,6 +12,40 @@ class SaleViewSet(viewsets.ModelViewSet):
     queryset = Sale.objects.all()
     serializer_class = SaleSerializer
 
+    def get_date_range(self, duration):
+        """Get the start and end dates based on the duration parameter"""
+        current_date = now()
+        
+        if duration == "last_month":
+            # Calculate last month
+            if current_date.month == 1:
+                last_month = 12
+                last_month_year = current_date.year - 1
+            else:
+                last_month = current_date.month - 1
+                last_month_year = current_date.year
+            
+            start_date = datetime(last_month_year, last_month, 1)
+            if last_month == 12:
+                end_date = datetime(last_month_year + 1, 1, 1) - timedelta(days=1)
+            else:
+                end_date = datetime(last_month_year, last_month + 1, 1) - timedelta(days=1)
+                
+        elif duration == "current_year":
+            # Current year (January 1st to December 31st)
+            start_date = datetime(current_date.year, 1, 1)
+            end_date = datetime(current_date.year, 12, 31)
+            
+        else:  # "current_month" (default)
+            # Current month
+            start_date = datetime(current_date.year, current_date.month, 1)
+            if current_date.month == 12:
+                end_date = datetime(current_date.year + 1, 1, 1) - timedelta(days=1)
+            else:
+                end_date = datetime(current_date.year, current_date.month + 1, 1) - timedelta(days=1)
+        
+        return start_date, end_date
+
     @action(detail=False, methods=["get"])
     def unshipped(self, request):
         """
@@ -39,17 +73,23 @@ class SaleViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def daily_sales(self, request):
         """
-        Returns daily sales data from the start of current month up to current date.
+        Returns daily sales data based on the duration parameter.
+        Duration options: current_month (default), last_month, current_year
         """
-        # Get the first day of current month and current date
-        today = now()
-        first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        current_date = today.date()
-
-        # Get all sales from start of month to current date
+        # Get duration from request parameters, default to "current_month"
+        duration = request.query_params.get('duration', 'current_month')
+        
+        # Validate duration parameter
+        valid_durations = ['current_month', 'last_month', 'current_year']
+        if duration not in valid_durations:
+            duration = 'current_month'  # Default to current month if invalid
+        
+        start_date, end_date = self.get_date_range(duration)
+        
+        # Get all sales from start date to end date
         sales_data = Sale.objects.filter(
-            sale_date__gte=first_day,
-            sale_date__lte=today
+            sale_date__gte=start_date,
+            sale_date__lte=end_date
         ).annotate(
             date=ExpressionWrapper(
                 F('sale_date__date'),
@@ -60,10 +100,10 @@ class SaleViewSet(viewsets.ModelViewSet):
             total_amount=Sum(F('quantity_sold') * F('sale_price'))
         ).order_by('date')
 
-        # Create a list of dates from start of month to current date
+        # Create a list of dates from start date to end date
         all_dates = []
-        current = first_day.date()
-        while current <= current_date:
+        current = start_date.date()
+        while current <= end_date.date():
             all_dates.append(current)
             current += timedelta(days=1)
 
@@ -81,7 +121,13 @@ class SaleViewSet(viewsets.ModelViewSet):
                 "total_amount": float(sales_for_date['total_amount'] or 0)
             })
 
-        return Response(response_data)
+        # Add metadata about the duration and date range
+        return Response({
+            "duration": duration,
+            "start_date": start_date.strftime("%Y-%m-%d"),
+            "end_date": end_date.strftime("%Y-%m-%d"),
+            "daily_sales": response_data
+        })
 
     @action(detail=True, methods=["patch"])
     def update_shipping_status(self, request, pk=None):

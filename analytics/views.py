@@ -1,4 +1,5 @@
 from django.utils.timezone import now
+from datetime import datetime, timedelta
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -11,54 +12,96 @@ from inventory.models import Product
 class AnalyticsView(APIView):
     # permission_classes = [IsAuthenticated]  # Optional: Restrict access to logged-in users
 
-    def get(self, request):
-        current_month = now().month
-        current_year = now().year
+    def get_date_range(self, duration):
+        """Get the start and end dates based on the duration parameter"""
+        current_date = now()
+        
+        if duration == "last_month":
+            # Calculate last month
+            if current_date.month == 1:
+                last_month = 12
+                last_month_year = current_date.year - 1
+            else:
+                last_month = current_date.month - 1
+                last_month_year = current_date.year
+            
+            start_date = datetime(last_month_year, last_month, 1)
+            if last_month == 12:
+                end_date = datetime(last_month_year + 1, 1, 1) - timedelta(days=1)
+            else:
+                end_date = datetime(last_month_year, last_month + 1, 1) - timedelta(days=1)
+                
+        elif duration == "current_year":
+            # Current year (January 1st to December 31st)
+            start_date = datetime(current_date.year, 1, 1)
+            end_date = datetime(current_date.year, 12, 31)
+            
+        else:  # "current_month" (default)
+            # Current month
+            start_date = datetime(current_date.year, current_date.month, 1)
+            if current_date.month == 12:
+                end_date = datetime(current_date.year + 1, 1, 1) - timedelta(days=1)
+            else:
+                end_date = datetime(current_date.year, current_date.month + 1, 1) - timedelta(days=1)
+        
+        return start_date, end_date
 
-        # 1. Inventory Bought This Month
-        inventory_bought_this_month = Product.objects.filter(
-            bought_at__month=current_month
-        ).filter(
-            bought_at__year=current_year
+    def get(self, request):
+        # Get duration from request parameters, default to "current_month"
+        duration = request.query_params.get('duration', 'current_month')
+        
+        # Validate duration parameter
+        valid_durations = ['current_month', 'last_month', 'current_year']
+        if duration not in valid_durations:
+            duration = 'current_month'  # Default to current month if invalid
+        
+        start_date, end_date = self.get_date_range(duration)
+        
+        # 1. Inventory Bought in the specified duration
+        inventory_bought = Product.objects.filter(
+            bought_at__gte=start_date,
+            bought_at__lte=end_date
         ).aggregate(total_value=Sum(F('stock') * F('price')))['total_value'] or 0
 
-        # 2. Sales This Month
-        sales_this_month = Sale.objects.filter(
-            sale_date__month=current_month,
-            sale_date__year=current_year
+        # 2. Sales in the specified duration
+        sales = Sale.objects.filter(
+            sale_date__gte=start_date,
+            sale_date__lte=end_date
         ).aggregate(total_revenue=Sum(F('quantity_sold') * F('sale_price')))['total_revenue'] or 0
 
-        cogs_this_month = Sale.objects.filter(
-            sale_date__month=current_month,
-            sale_date__year=current_year
+        cogs = Sale.objects.filter(
+            sale_date__gte=start_date,
+            sale_date__lte=end_date
         ).aggregate(
             total_cogs=Sum(F('quantity_sold') * F('product__price'))
         )['total_cogs'] or 0
 
-        # 3. Total Unsold Inventory
+        # 3. Total Unsold Inventory (this doesn't change based on duration)
         total_unsold_inventory = Product.objects.filter(available_quantity__gt=0).aggregate(
             total_value=Sum(F('available_quantity') * F('price'))
         )['total_value'] or 0
 
-        # 4. Expenses This Month
+        # 4. Expenses in the specified duration
         total_expenses = Expenses.objects.filter(
-            date__month=current_month,
-            date__year=current_year
+            date__gte=start_date,
+            date__lte=end_date
         ).aggregate(total=Sum('amount'))['total'] or 0
 
-
-        # 5. Profit This Month
-        profit_this_month = sales_this_month - cogs_this_month
+        # 5. Profit in the specified duration
+        profit = sales - cogs
 
         # Prepare Response Data
         data = {
-            "inventory_bought_this_month": inventory_bought_this_month,
-            "sales_this_month": sales_this_month,
-            "cost_of_goods_sold_this_month": cogs_this_month,
+            "duration": duration,
+            "start_date": start_date.strftime("%Y-%m-%d"),
+            "end_date": end_date.strftime("%Y-%m-%d"),
+            "inventory_bought": inventory_bought,
+            "sales": sales,
+            "cost_of_goods_sold": cogs,
             "total_unsold_inventory": total_unsold_inventory,
-            "profit_this_month": profit_this_month,
-            "profit_margin_this_month": (profit_this_month / cogs_this_month if cogs_this_month else 0)*100,
-            "expenses_this_month":  total_expenses,
+            "profit": profit,
+            "profit_margin": (profit / cogs if cogs else 0) * 100,
+            "expenses": total_expenses,
         }
 
         return Response(data)
