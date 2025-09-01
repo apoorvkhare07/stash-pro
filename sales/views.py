@@ -4,7 +4,7 @@ from .models import Sale
 from .serializers import SaleSerializer
 from rest_framework.response import Response
 from django.db.models import Sum, F, ExpressionWrapper, DurationField, Count, DateField
-from django.utils.timezone import now
+from django.utils.timezone import now, make_aware
 from datetime import datetime, timedelta
 
 
@@ -25,24 +25,24 @@ class SaleViewSet(viewsets.ModelViewSet):
                 last_month = current_date.month - 1
                 last_month_year = current_date.year
             
-            start_date = datetime(last_month_year, last_month, 1)
+            start_date = make_aware(datetime(last_month_year, last_month, 1))
             if last_month == 12:
-                end_date = datetime(last_month_year + 1, 1, 1) - timedelta(days=1)
+                end_date = make_aware(datetime(last_month_year + 1, 1, 1)) - timedelta(days=1)
             else:
-                end_date = datetime(last_month_year, last_month + 1, 1) - timedelta(days=1)
+                end_date = make_aware(datetime(last_month_year, last_month + 1, 1)) - timedelta(days=1)
                 
         elif duration == "current_year":
             # Current year (January 1st to December 31st)
-            start_date = datetime(current_date.year, 1, 1)
-            end_date = datetime(current_date.year, 12, 31)
+            start_date = make_aware(datetime(current_date.year, 1, 1))
+            end_date = make_aware(datetime(current_date.year, 12, 31, 23, 59, 59))
             
         else:  # "current_month" (default)
             # Current month
-            start_date = datetime(current_date.year, current_date.month, 1)
+            start_date = make_aware(datetime(current_date.year, current_date.month, 1))
             if current_date.month == 12:
-                end_date = datetime(current_date.year + 1, 1, 1) - timedelta(days=1)
+                end_date = make_aware(datetime(current_date.year + 1, 1, 1)) - timedelta(days=1)
             else:
-                end_date = datetime(current_date.year, current_date.month + 1, 1) - timedelta(days=1)
+                end_date = make_aware(datetime(current_date.year, current_date.month + 1, 1)) - timedelta(days=1)
         
         return start_date, end_date
 
