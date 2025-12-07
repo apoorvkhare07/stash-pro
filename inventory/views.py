@@ -8,12 +8,13 @@ from sales.models import Sale
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
+from django.utils.timezone import make_aware
 
 
 class ProductFilter(filters.FilterSet):
     status = filters.CharFilter(method='filter_status')
-    start_date = filters.DateFilter(field_name='bought_at', lookup_expr='gte')
-    end_date = filters.DateFilter(field_name='bought_at', lookup_expr='lte')
+    start_date = filters.DateFilter(method='filter_start_date')
+    end_date = filters.DateFilter(method='filter_end_date')
 
     class Meta:
         model = Product
@@ -24,6 +25,22 @@ class ProductFilter(filters.FilterSet):
             return queryset.filter(available_quantity=0)
         elif value.lower() == 'available':
             return queryset.filter(available_quantity__gt=0)
+        return queryset
+
+    def filter_start_date(self, queryset, name, value):
+        """Filter products bought on or after the start date"""
+        if value:
+            # Convert date to timezone-aware datetime at start of day
+            start_datetime = make_aware(datetime.datetime.combine(value, datetime.time.min))
+            return queryset.filter(bought_at__gte=start_datetime)
+        return queryset
+
+    def filter_end_date(self, queryset, name, value):
+        """Filter products bought on or before the end date"""
+        if value:
+            # Convert date to timezone-aware datetime at end of day
+            end_datetime = make_aware(datetime.datetime.combine(value, datetime.time.max))
+            return queryset.filter(bought_at__lte=end_datetime)
         return queryset
 
 
