@@ -6,11 +6,26 @@ from rest_framework.response import Response
 from django.db.models import Sum, F, ExpressionWrapper, DurationField, Count, DateField
 from django.utils.timezone import now, make_aware
 from datetime import datetime, timedelta
+from django_filters import rest_framework as filters
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
+
+
+class SaleFilter(filters.FilterSet):
+    start_date = filters.DateFilter(field_name='sale_date', lookup_expr='gte')
+    end_date = filters.DateFilter(field_name='sale_date', lookup_expr='lte')
+    shipping_status = filters.CharFilter(field_name='shipping_status')
+
+    class Meta:
+        model = Sale
+        fields = ['start_date', 'end_date', 'shipping_status']
 
 
 class SaleViewSet(viewsets.ModelViewSet):
     queryset = Sale.objects.all()
     serializer_class = SaleSerializer
+    filter_backends = (filters.DjangoFilterBackend,)
+    filterset_class = SaleFilter
 
     def get_date_range(self, duration):
         """Get the start and end dates based on the duration parameter"""
@@ -43,6 +58,14 @@ class SaleViewSet(viewsets.ModelViewSet):
         
         return start_date, end_date
 
+    def parse_custom_date(self, date_str):
+        """Parse a date string in YYYY-MM-DD format"""
+        try:
+            parsed_date = datetime.strptime(date_str, "%Y-%m-%d")
+            return make_aware(parsed_date)
+        except (ValueError, TypeError):
+            return None
+
     @action(detail=False, methods=["get"])
     def unshipped(self, request):
         """
@@ -67,21 +90,67 @@ class SaleViewSet(viewsets.ModelViewSet):
 
         return Response(response_data)
 
+    @extend_schema(
+        summary="Get daily sales data",
+        description="Returns daily sales data for the specified date range. Use custom start_date/end_date or preset duration.",
+        parameters=[
+            OpenApiParameter(
+                name='start_date',
+                type=OpenApiTypes.DATE,
+                location=OpenApiParameter.QUERY,
+                description='Custom start date (YYYY-MM-DD). Takes priority over duration.',
+                required=False,
+            ),
+            OpenApiParameter(
+                name='end_date',
+                type=OpenApiTypes.DATE,
+                location=OpenApiParameter.QUERY,
+                description='Custom end date (YYYY-MM-DD). Takes priority over duration.',
+                required=False,
+            ),
+            OpenApiParameter(
+                name='duration',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description='Preset duration (used if custom dates not provided)',
+                required=False,
+                enum=['current_month', 'last_month', 'current_year'],
+            ),
+        ],
+    )
     @action(detail=False, methods=["get"])
     def daily_sales(self, request):
         """
-        Returns daily sales data based on the duration parameter.
+        Returns daily sales data based on the duration parameter or custom date range.
         Duration options: current_month (default), last_month, current_year
         """
-        # Get duration from request parameters, default to "current_month"
-        duration = request.query_params.get('duration', 'current_month')
+        # Check for custom date range first
+        start_date_param = request.query_params.get('start_date')
+        end_date_param = request.query_params.get('end_date')
         
-        # Validate duration parameter
-        valid_durations = ['current_month', 'last_month', 'current_year']
-        if duration not in valid_durations:
-            duration = 'current_month'  # Default to current month if invalid
+        custom_start = self.parse_custom_date(start_date_param)
+        custom_end = self.parse_custom_date(end_date_param)
         
-        start_date, end_date = self.get_date_range(duration)
+        # If both custom dates are provided and valid, use them
+        if custom_start and custom_end:
+            if custom_start > custom_end:
+                return Response(
+                    {"error": "start_date must be before or equal to end_date"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            start_date = custom_start
+            end_date = custom_end.replace(hour=23, minute=59, second=59)
+            duration = "custom"
+        else:
+            # Fall back to duration-based logic
+            duration = request.query_params.get('duration', 'current_month')
+            
+            # Validate duration parameter
+            valid_durations = ['current_month', 'last_month', 'current_year']
+            if duration not in valid_durations:
+                duration = 'current_month'  # Default to current month if invalid
+            
+            start_date, end_date = self.get_date_range(duration)
         
         # Get all sales from start date to end date
         sales_data = Sale.objects.filter(

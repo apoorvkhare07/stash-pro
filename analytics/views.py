@@ -7,6 +7,8 @@ from django.db.models import Sum, F
 from sales.models import Sale
 from expense.models import Expenses
 from inventory.models import Product
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 
 
 class AnalyticsView(APIView):
@@ -43,16 +45,71 @@ class AnalyticsView(APIView):
         
         return start_date, end_date
 
+    def parse_custom_date(self, date_str):
+        """Parse a date string in YYYY-MM-DD format"""
+        try:
+            parsed_date = datetime.strptime(date_str, "%Y-%m-%d")
+            return make_aware(parsed_date)
+        except (ValueError, TypeError):
+            return None
+
+    @extend_schema(
+        summary="Get overall analytics",
+        description="Returns analytics data for the specified date range. Use custom start_date/end_date or preset duration.",
+        parameters=[
+            OpenApiParameter(
+                name='start_date',
+                type=OpenApiTypes.DATE,
+                location=OpenApiParameter.QUERY,
+                description='Custom start date (YYYY-MM-DD). Takes priority over duration.',
+                required=False,
+            ),
+            OpenApiParameter(
+                name='end_date',
+                type=OpenApiTypes.DATE,
+                location=OpenApiParameter.QUERY,
+                description='Custom end date (YYYY-MM-DD). Takes priority over duration.',
+                required=False,
+            ),
+            OpenApiParameter(
+                name='duration',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description='Preset duration (used if custom dates not provided)',
+                required=False,
+                enum=['current_month', 'last_month', 'current_year'],
+            ),
+        ],
+    )
     def get(self, request):
-        # Get duration from request parameters, default to "current_month"
-        duration = request.query_params.get('duration', 'current_month')
+        # Check for custom date range first
+        start_date_param = request.query_params.get('start_date')
+        end_date_param = request.query_params.get('end_date')
         
-        # Validate duration parameter
-        valid_durations = ['current_month', 'last_month', 'current_year']
-        if duration not in valid_durations:
-            duration = 'current_month'  # Default to current month if invalid
+        custom_start = self.parse_custom_date(start_date_param)
+        custom_end = self.parse_custom_date(end_date_param)
         
-        start_date, end_date = self.get_date_range(duration)
+        # If both custom dates are provided and valid, use them
+        if custom_start and custom_end:
+            if custom_start > custom_end:
+                return Response(
+                    {"error": "start_date must be before or equal to end_date"},
+                    status=400
+                )
+            start_date = custom_start
+            # Set end_date to end of day
+            end_date = custom_end.replace(hour=23, minute=59, second=59)
+            duration = "custom"
+        else:
+            # Fall back to duration-based logic
+            duration = request.query_params.get('duration', 'current_month')
+            
+            # Validate duration parameter
+            valid_durations = ['current_month', 'last_month', 'current_year']
+            if duration not in valid_durations:
+                duration = 'current_month'  # Default to current month if invalid
+            
+            start_date, end_date = self.get_date_range(duration)
         
         # 1. Inventory Bought in the specified duration
         inventory_bought = Product.objects.filter(

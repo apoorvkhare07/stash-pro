@@ -6,14 +6,18 @@ from .serializers import ProductSerializer, LotSerializer, PaymentSerializer
 from rest_framework.response import Response
 from sales.models import Sale
 from django_filters import rest_framework as filters
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
+from drf_spectacular.types import OpenApiTypes
 
 
 class ProductFilter(filters.FilterSet):
     status = filters.CharFilter(method='filter_status')
+    start_date = filters.DateFilter(field_name='bought_at', lookup_expr='gte')
+    end_date = filters.DateFilter(field_name='bought_at', lookup_expr='lte')
 
     class Meta:
         model = Product
-        fields = ['status']
+        fields = ['status', 'start_date', 'end_date']
 
     def filter_status(self, queryset, name, value):
         if value.lower() == 'sold':
@@ -23,12 +27,48 @@ class ProductFilter(filters.FilterSet):
         return queryset
 
 
+class LotFilter(filters.FilterSet):
+    start_date = filters.DateFilter(field_name='bought_on', lookup_expr='gte')
+    end_date = filters.DateFilter(field_name='bought_on', lookup_expr='lte')
+    status = filters.CharFilter(field_name='status')
+
+    class Meta:
+        model = Lot
+        fields = ['start_date', 'end_date', 'status']
+
+
+class PaymentFilter(filters.FilterSet):
+    start_date = filters.DateFilter(field_name='payment_date', lookup_expr='gte')
+    end_date = filters.DateFilter(field_name='payment_date', lookup_expr='lte')
+    lot = filters.NumberFilter(field_name='lot')
+
+    class Meta:
+        model = Payment
+        fields = ['start_date', 'end_date', 'lot']
+
+
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     filter_backends = (filters.DjangoFilterBackend,)
     filterset_class = ProductFilter
 
+    @extend_schema(
+        summary="Mark product as sold",
+        description="Creates a sale record and decreases product quantity",
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'quantity': {'type': 'integer', 'default': 1},
+                    'sale_price': {'type': 'number'},
+                    'customer': {'type': 'string'},
+                },
+                'example': {'quantity': 1, 'sale_price': 299.99, 'customer': 'John Doe'}
+            }
+        },
+        responses={200: {'description': 'Successfully marked as sold'}},
+    )
     @action(detail=True, methods=["post"])
     def mark_as_sold(self, request, pk=None):
         product = self.get_object()
@@ -58,6 +98,10 @@ class ProductViewSet(viewsets.ModelViewSet):
 
         return Response({"message": f"Successfully marked {quantity} unit(s) as sold"})
 
+    @extend_schema(
+        summary="Get inventory overview",
+        description="Returns total unsold inventory count and list of unsold items",
+    )
     @action(detail=False, methods=["get"])
     def overview(self, request):
         # Calculate total unsold inventory
@@ -86,11 +130,11 @@ class ProductViewSet(viewsets.ModelViewSet):
 class LotViewSet(viewsets.ModelViewSet):
     queryset = Lot.objects.all()
     serializer_class = LotSerializer
+    filter_backends = (filters.DjangoFilterBackend,)
+    filterset_class = LotFilter
 
     def get_queryset(self):
-        queryset = Lot.objects.all()
-        # Add any filtering if needed
-        return queryset
+        return Lot.objects.all().order_by('-bought_on')
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -103,14 +147,11 @@ class LotViewSet(viewsets.ModelViewSet):
 class PaymentViewSet(viewsets.ModelViewSet):
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
+    filter_backends = (filters.DjangoFilterBackend,)
+    filterset_class = PaymentFilter
     
     def get_queryset(self):
-        queryset = Payment.objects.all()
-        # Filter by lot if provided
-        lot_id = self.request.query_params.get('lot', None)
-        if lot_id:
-            queryset = queryset.filter(lot=lot_id)
-        return queryset
+        return Payment.objects.all().order_by('-payment_date')
     
     def create(self, request, *args, **kwargs):
         try:
