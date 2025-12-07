@@ -15,6 +15,8 @@ class ProductFilter(filters.FilterSet):
     status = filters.CharFilter(method='filter_status')
     start_date = filters.DateFilter(method='filter_start_date')
     end_date = filters.DateFilter(method='filter_end_date')
+    start_date = filters.DateFilter(method='filter_start_date')
+    end_date = filters.DateFilter(method='filter_end_date')
 
     class Meta:
         model = Product
