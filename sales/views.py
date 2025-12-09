@@ -122,7 +122,8 @@ class SaleViewSet(viewsets.ModelViewSet):
     def daily_sales(self, request):
         """
         Returns daily sales data based on the duration parameter or custom date range.
-        Duration options: current_month (default), last_month, current_year
+        Duration options: current_month, last_month, current_year
+        If no dates are provided (or invalid), returns all sales data without date filtering.
         """
         # Check for custom date range first
         start_date_param = request.query_params.get('start_date')
@@ -130,6 +131,12 @@ class SaleViewSet(viewsets.ModelViewSet):
         
         custom_start = self.parse_custom_date(start_date_param)
         custom_end = self.parse_custom_date(end_date_param)
+        
+        # Check for duration parameter
+        duration = request.query_params.get('duration')
+        
+        start_date = None
+        end_date = None
         
         # If both custom dates are provided and valid, use them
         if custom_start and custom_end:
@@ -141,22 +148,25 @@ class SaleViewSet(viewsets.ModelViewSet):
             start_date = custom_start
             end_date = custom_end.replace(hour=23, minute=59, second=59)
             duration = "custom"
-        else:
-            # Fall back to duration-based logic
-            duration = request.query_params.get('duration', 'current_month')
-            
-            # Validate duration parameter
+        elif duration:
+            # Use duration-based logic only if duration is explicitly provided
             valid_durations = ['current_month', 'last_month', 'current_year']
-            if duration not in valid_durations:
-                duration = 'current_month'  # Default to current month if invalid
-            
-            start_date, end_date = self.get_date_range(duration)
+            if duration in valid_durations:
+                start_date, end_date = self.get_date_range(duration)
+            # If duration is invalid, we'll return all data (start_date and end_date stay None)
         
-        # Get all sales from start date to end date
-        sales_data = Sale.objects.filter(
-            sale_date__gte=start_date,
-            sale_date__lte=end_date
-        ).annotate(
+        # Build base queryset
+        sales_queryset = Sale.objects.all()
+        
+        # Apply date filters only if we have valid dates
+        if start_date and end_date:
+            sales_queryset = sales_queryset.filter(
+                sale_date__gte=start_date,
+                sale_date__lte=end_date
+            )
+        
+        # Get sales data grouped by date
+        sales_data = sales_queryset.annotate(
             date=ExpressionWrapper(
                 F('sale_date__date'),
                 output_field=DateField()
@@ -166,34 +176,50 @@ class SaleViewSet(viewsets.ModelViewSet):
             total_amount=Sum(F('quantity_sold') * F('sale_price'))
         ).order_by('date')
 
-        # Create a list of dates from start date to end date
-        all_dates = []
-        current = start_date.date()
-        while current <= end_date.date():
-            all_dates.append(current)
-            current += timedelta(days=1)
+        # If we have date range, create a list of all dates
+        if start_date and end_date:
+            all_dates = []
+            current = start_date.date()
+            while current <= end_date.date():
+                all_dates.append(current)
+                current += timedelta(days=1)
 
-        # Create response data with all dates, including those with no sales
-        response_data = []
-        for date in all_dates:
-            date_str = date.strftime("%Y-%m-%d")
-            sales_for_date = next(
-                (item for item in sales_data if item['date'] == date),
-                {'total_sales': 0, 'total_amount': 0}
-            )
-            response_data.append({
-                "date": date_str,
-                "total_sales": sales_for_date['total_sales'],
-                "total_amount": float(sales_for_date['total_amount'] or 0)
+            # Create response data with all dates, including those with no sales
+            response_data = []
+            for date in all_dates:
+                date_str = date.strftime("%Y-%m-%d")
+                sales_for_date = next(
+                    (item for item in sales_data if item['date'] == date),
+                    {'total_sales': 0, 'total_amount': 0}
+                )
+                response_data.append({
+                    "date": date_str,
+                    "total_sales": sales_for_date['total_sales'],
+                    "total_amount": float(sales_for_date['total_amount'] or 0)
+                })
+            
+            return Response({
+                "duration": duration,
+                "start_date": start_date.strftime("%Y-%m-%d"),
+                "end_date": end_date.strftime("%Y-%m-%d"),
+                "daily_sales": response_data
             })
-
-        # Add metadata about the duration and date range
-        return Response({
-            "duration": duration,
-            "start_date": start_date.strftime("%Y-%m-%d"),
-            "end_date": end_date.strftime("%Y-%m-%d"),
-            "daily_sales": response_data
-        })
+        else:
+            # No date filter - return all sales grouped by date
+            response_data = []
+            for item in sales_data:
+                response_data.append({
+                    "date": item['date'].strftime("%Y-%m-%d") if item['date'] else None,
+                    "total_sales": item['total_sales'],
+                    "total_amount": float(item['total_amount'] or 0)
+                })
+            
+            return Response({
+                "duration": "all",
+                "start_date": None,
+                "end_date": None,
+                "daily_sales": response_data
+            })
 
     @action(detail=True, methods=["patch"])
     def update_shipping_status(self, request, pk=None):

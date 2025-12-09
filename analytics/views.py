@@ -89,6 +89,12 @@ class AnalyticsView(APIView):
         custom_start = self.parse_custom_date(start_date_param)
         custom_end = self.parse_custom_date(end_date_param)
         
+        # Check for duration parameter
+        duration = request.query_params.get('duration')
+        
+        start_date = None
+        end_date = None
+        
         # If both custom dates are provided and valid, use them
         if custom_start and custom_end:
             if custom_start > custom_end:
@@ -100,33 +106,44 @@ class AnalyticsView(APIView):
             # Set end_date to end of day
             end_date = custom_end.replace(hour=23, minute=59, second=59)
             duration = "custom"
-        else:
-            # Fall back to duration-based logic
-            duration = request.query_params.get('duration', 'current_month')
-            
-            # Validate duration parameter
+        elif duration:
+            # Use duration-based logic only if duration is explicitly provided
             valid_durations = ['current_month', 'last_month', 'current_year']
-            if duration not in valid_durations:
-                duration = 'current_month'  # Default to current month if invalid
-            
-            start_date, end_date = self.get_date_range(duration)
+            if duration in valid_durations:
+                start_date, end_date = self.get_date_range(duration)
+            # If duration is invalid, we'll return all data (start_date and end_date stay None)
         
-        # 1. Inventory Bought in the specified duration
-        inventory_bought = Product.objects.filter(
-            bought_at__gte=start_date,
-            bought_at__lte=end_date
-        ).aggregate(total_value=Sum(F('stock') * F('price')))['total_value'] or 0
+        # Build querysets with optional date filtering
+        inventory_queryset = Product.objects.all()
+        sales_queryset = Sale.objects.all()
+        expenses_queryset = Expenses.objects.all()
+        
+        # Apply date filters only if we have valid dates
+        if start_date and end_date:
+            inventory_queryset = inventory_queryset.filter(
+                bought_at__gte=start_date,
+                bought_at__lte=end_date
+            )
+            sales_queryset = sales_queryset.filter(
+                sale_date__gte=start_date,
+                sale_date__lte=end_date
+            )
+            expenses_queryset = expenses_queryset.filter(
+                date__gte=start_date,
+                date__lte=end_date
+            )
+        
+        # 1. Inventory Bought
+        inventory_bought = inventory_queryset.aggregate(
+            total_value=Sum(F('stock') * F('price'))
+        )['total_value'] or 0
 
-        # 2. Sales in the specified duration
-        sales = Sale.objects.filter(
-            sale_date__gte=start_date,
-            sale_date__lte=end_date
-        ).aggregate(total_revenue=Sum(F('quantity_sold') * F('sale_price')))['total_revenue'] or 0
+        # 2. Sales
+        sales = sales_queryset.aggregate(
+            total_revenue=Sum(F('quantity_sold') * F('sale_price'))
+        )['total_revenue'] or 0
 
-        cogs = Sale.objects.filter(
-            sale_date__gte=start_date,
-            sale_date__lte=end_date
-        ).aggregate(
+        cogs = sales_queryset.aggregate(
             total_cogs=Sum(F('quantity_sold') * F('product__price'))
         )['total_cogs'] or 0
 
@@ -135,20 +152,17 @@ class AnalyticsView(APIView):
             total_value=Sum(F('available_quantity') * F('price'))
         )['total_value'] or 0
 
-        # 4. Expenses in the specified duration
-        total_expenses = Expenses.objects.filter(
-            date__gte=start_date,
-            date__lte=end_date
-        ).aggregate(total=Sum('amount'))['total'] or 0
+        # 4. Expenses
+        total_expenses = expenses_queryset.aggregate(total=Sum('amount'))['total'] or 0
 
-        # 5. Profit in the specified duration
+        # 5. Profit
         profit = sales - cogs
 
         # Prepare Response Data
         data = {
-            "duration": duration,
-            "start_date": start_date.strftime("%Y-%m-%d"),
-            "end_date": end_date.strftime("%Y-%m-%d"),
+            "duration": duration if duration else "all",
+            "start_date": start_date.strftime("%Y-%m-%d") if start_date else None,
+            "end_date": end_date.strftime("%Y-%m-%d") if end_date else None,
             "inventory_bought": inventory_bought,
             "sales": sales,
             "cost_of_goods_sold": cogs,
