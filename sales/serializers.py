@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from decimal import Decimal
 from inventory.serializers import ProductTitleSerializer
-from .models import Sale
+from .models import Sale, ShippingInfo
 from inventory.models import Product
 from django.utils.timezone import now
 from django.db import transaction
@@ -100,3 +100,10 @@ class SaleSerializer(serializers.ModelSerializer):
             product.save()
 
             return sale
+
+
+
+class ShippingInfoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShippingInfo
+        fields = ('id', 'customer_name', 'customer_email', 'customer_phone', 'customer_address', 'customer_pincode')

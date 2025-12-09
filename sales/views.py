@@ -1,7 +1,7 @@
 from rest_framework.decorators import action
 from rest_framework import viewsets, status
-from .models import Sale
-from .serializers import SaleSerializer
+from .models import Sale, ShippingInfo
+from .serializers import SaleSerializer, ShippingInfoSerializer
 from rest_framework.response import Response
 from django.db.models import Sum, F, ExpressionWrapper, DurationField, Count, DateField
 from django.utils.timezone import now, make_aware
@@ -233,3 +233,30 @@ class SaleViewSet(viewsets.ModelViewSet):
             )
 
 
+
+
+class ShippingInfoViewSet(viewsets.ModelViewSet):
+    queryset = ShippingInfo.objects.all()
+    serializer_class = ShippingInfoSerializer
+
+    @action(detail=True, methods=["get"])
+    def get_shipping_info(self, request, pk=None):
+        shipping_info = self.get_object().shipping_info
+        if shipping_info:
+            serializer = self.get_serializer(shipping_info)
+            return Response(serializer.data)
+        else:
+            return Response(status=status.HTTP_404_NOT_FOUND)   
+
+    @action(detail=True, methods=["post"])
+    def create_shipping_info(self, request, pk=None):
+        sale = self.get_object()
+        shipping_info = ShippingInfo.objects.create(
+            sale=sale,
+            customer_name=request.data.get('customer_name'),
+            customer_email=request.data.get('customer_email'),
+            customer_phone=request.data.get('customer_phone'),
+            customer_address=request.data.get('customer_address'),
+            customer_pincode=request.data.get('customer_pincode')
+        )
+        return Response(status=status.HTTP_201_CREATED)

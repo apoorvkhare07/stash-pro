@@ -26,3 +26,13 @@ class Sale(BaseModel):
 
     def __str__(self):
         return f"Sale of {self.product.name} on {self.sale_date}"
+
+
+
+class ShippingInfo(BaseModel):
+    customer_name = models.CharField(max_length=255)
+    customer_email = models.EmailField()
+    customer_phone = models.CharField(max_length=255)
+    customer_address = models.TextField()
+    customer_pincode = models.CharField(max_length=255)
+    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name="shipping_info")

@@ -43,37 +43,14 @@ class ExpensesViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             
-            # Additional validation based on expense type
-            expense_type = serializer.validated_data.get('type')
-            sale = serializer.validated_data.get('sale')
-            product = serializer.validated_data.get('product')
-            
-            # Custom validation messages
-            if expense_type in [Expenses.ExpenseType.REFUND]:
-                if not sale:
-                    return Response(
-                        {"error": f"{expense_type.title()} expenses require a sale association"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
-            if expense_type == Expenses.ExpenseType.SERVICING:
-                if not product:
-                    return Response(
-                        {"error": "Servicing expenses require a product association"},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-            
             # Create the expense
             expense = serializer.save()
-            
-            # Log the creation (optional)
-            print(f"Created {expense_type} expense: {expense.amount} for {expense.description or 'N/A'}")
             
             # Return success response
             headers = self.get_success_headers(serializer.data)
             return Response(
                 {
-                    "message": f"{expense_type.title()} expense created successfully",
+                    "message": f"{expense.type.title()} expense created successfully",
                     "expense": serializer.data
                 },
                 status=status.HTTP_201_CREATED,

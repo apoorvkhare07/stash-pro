@@ -47,14 +47,5 @@ class ExpensesSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, data):
-        expense_type = data.get('type')
-        sale = data.get('sale')
-        product = data.get('product')
-        
-        if expense_type == Expenses.ExpenseType.REFUND and not sale:
-            raise serializers.ValidationError({"sale": "Sale is required for refund expenses"})
-        
-        if expense_type == Expenses.ExpenseType.SERVICING and not product:
-            raise serializers.ValidationError({"product": "Product is required for servicing expenses"})
-
+        # sale and product are optional - use them when provided
         return data
