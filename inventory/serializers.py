@@ -80,19 +80,23 @@ class ProductSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, data):
-        # Check required fields
-        if not data.get('name'):
-            raise serializers.ValidationError({"name": "Name is required"})
-        if not data.get('price'):
-            raise serializers.ValidationError({"price": "Price is required"})
-        if not data.get('stock'):
-            raise serializers.ValidationError({"stock": "Stock is required"})
-        if not data.get('lot'):
-            raise serializers.ValidationError({"lot": "Lot is required"})
+        instance = self.instance  # Will be None for create, Product object for update
+        
+        # For create, all fields are required
+        if not instance:
+            if not data.get('name'):
+                raise serializers.ValidationError({"name": "Name is required"})
+            if not data.get('price'):
+                raise serializers.ValidationError({"price": "Price is required"})
+            if not data.get('stock'):
+                raise serializers.ValidationError({"stock": "Stock is required"})
+            if not data.get('lot'):
+                raise serializers.ValidationError({"lot": "Lot is required"})
 
-        # Set available_quantity equal to stock for new products
-        if 'stock' in data:
-            data['available_quantity'] = data['stock']
+            # Set available_quantity equal to stock for new products only
+            if 'stock' in data:
+                data['available_quantity'] = data['stock']
+        
         return data
 
 

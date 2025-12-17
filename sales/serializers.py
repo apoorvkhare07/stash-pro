@@ -9,13 +9,13 @@ from django.db import transaction
 
 class SaleSerializer(serializers.ModelSerializer):
     product_details = ProductTitleSerializer(source='product', read_only=True)
-    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all(), write_only=True)
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
     days_since_sale = serializers.SerializerMethodField()
 
     class Meta:
         model = Sale
         fields = ('id', 'product', 'product_details', 'quantity_sold', 'sale_price', 'customer', 'sale_date', 'shipping_status', 'days_since_sale', 'created_at', 'updated_at')
-        read_only_fields = ('shipping_status', 'created_at', 'updated_at')
+        read_only_fields = ('created_at', 'updated_at')
         extra_kwargs = {
             'product': {'required': True},
             'quantity_sold': {'required': True},
@@ -63,27 +63,37 @@ class SaleSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, data):
-        # Check required fields
-        if not data.get('product'):
-            raise serializers.ValidationError({"product": "Product is required"})
-        if not data.get('quantity_sold'):
-            raise serializers.ValidationError({"quantity_sold": "Quantity sold is required"})
-        if not data.get('sale_price'):
-            raise serializers.ValidationError({"sale_price": "Sale price is required"})
-        if not data.get('sale_date'):
-            raise serializers.ValidationError({"sale_date": "Sale date is required"})
+        instance = self.instance  # Will be None for create, Sale object for update
+        
+        # For create, all fields are required
+        if not instance:
+            if not data.get('product'):
+                raise serializers.ValidationError({"product": "Product is required"})
+            if not data.get('quantity_sold'):
+                raise serializers.ValidationError({"quantity_sold": "Quantity sold is required"})
+            if not data.get('sale_price'):
+                raise serializers.ValidationError({"sale_price": "Sale price is required"})
+            if not data.get('sale_date'):
+                raise serializers.ValidationError({"sale_date": "Sale date is required"})
 
         # Validate product availability
-        product = data.get('product')
-        quantity_sold = data.get('quantity_sold')
+        product = data.get('product', instance.product if instance else None)
+        quantity_sold = data.get('quantity_sold', instance.quantity_sold if instance else None)
+        
         if product and quantity_sold:
-            if product.available_quantity < quantity_sold:
+            available = product.available_quantity
+            # For updates, add back the original quantity if same product
+            if instance and instance.product == product:
+                available += instance.quantity_sold
+            
+            if available < quantity_sold:
                 raise serializers.ValidationError(
-                    {"quantity_sold": f"Only {product.available_quantity} units available"}
+                    {"quantity_sold": f"Only {available} units available"}
                 )
 
-        # Always set shipping_status to pending for new sales
-        data['shipping_status'] = Sale.ShippingStatus.SHIPPING_PENDING
+        # Set shipping_status to pending only for new sales
+        if not instance:
+            data['shipping_status'] = Sale.ShippingStatus.SHIPPING_PENDING
         return data
 
     def create(self, validated_data):
@@ -100,6 +110,29 @@ class SaleSerializer(serializers.ModelSerializer):
             product.save()
 
             return sale
+
+    def update(self, instance, validated_data):
+        with transaction.atomic():
+            old_product = instance.product
+            old_quantity = instance.quantity_sold
+            
+            new_product = validated_data.get('product', old_product)
+            new_quantity = validated_data.get('quantity_sold', old_quantity)
+            
+            # Restore old product's quantity
+            old_product.available_quantity += old_quantity
+            old_product.save()
+            
+            # Deduct from new product's quantity
+            new_product.available_quantity -= new_quantity
+            new_product.save()
+            
+            # Update the sale
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+            instance.save()
+            
+            return instance
 
 
 

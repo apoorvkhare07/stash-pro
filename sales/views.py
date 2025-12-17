@@ -27,6 +27,22 @@ class SaleViewSet(viewsets.ModelViewSet):
     filter_backends = (filters.DjangoFilterBackend,)
     filterset_class = SaleFilter
 
+    def destroy(self, request, *args, **kwargs):
+        """
+        Delete a sale and restore the product's available quantity.
+        """
+        instance = self.get_object()
+        product = instance.product
+        quantity_sold = instance.quantity_sold
+        
+        # Restore product quantity
+        product.available_quantity += quantity_sold
+        product.save()
+        
+        # Delete the sale
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     def get_date_range(self, duration):
         """Get the start and end dates based on the duration parameter"""
         current_date = now()

@@ -19,7 +19,7 @@ class Expenses(BaseModel):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     description = models.TextField(null=True, blank=True)
     vendor = models.CharField(max_length=255, null=True, blank=True)
-    date = models.DateField(auto_now_add=True)
+    date = models.DateField()  # User-provided expense date for calculations
     
     # Optional relationships - depending on expense type
     sale = models.ForeignKey(

@@ -11,7 +11,7 @@ class ExpensesSerializer(serializers.ModelSerializer):
     class Meta:
         model = Expenses
         fields = "__all__"
-        read_only_fields = ('date', 'created_at', 'updated_at')
+        read_only_fields = ('created_at', 'updated_at')
 
     def get_sale_details(self, obj):
         if obj.sale:

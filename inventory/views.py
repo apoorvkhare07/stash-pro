@@ -53,6 +53,46 @@ class ProductViewSet(viewsets.ModelViewSet):
     filter_backends = (filters.DjangoFilterBackend,)
     filterset_class = ProductFilter
 
+    def update(self, request, *args, **kwargs):
+        """
+        Update a product. If stock changes, adjust available_quantity accordingly.
+        """
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        old_stock = instance.stock
+        
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        
+        # Calculate stock difference and adjust available_quantity
+        new_stock = serializer.validated_data.get('stock', old_stock)
+        stock_diff = new_stock - old_stock
+        
+        self.perform_update(serializer)
+        
+        # Adjust available_quantity based on stock change
+        if stock_diff != 0:
+            instance.available_quantity = max(0, instance.available_quantity + stock_diff)
+            instance.save()
+        
+        return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Delete a product. Only allowed if no sales exist for this product.
+        """
+        instance = self.get_object()
+        
+        # Check if product has any sales
+        if instance.sales.exists():
+            return Response(
+                {"error": "Cannot delete product with existing sales. Delete the sales first."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @extend_schema(
         summary="Mark product as sold",
         description="Creates a sale record and decreases product quantity",
@@ -143,6 +183,22 @@ class LotViewSet(viewsets.ModelViewSet):
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
+    def destroy(self, request, *args, **kwargs):
+        """
+        Delete a lot. Only allowed if no products exist for this lot.
+        """
+        instance = self.get_object()
+        
+        # Check if lot has any products
+        if instance.products.exists():
+            return Response(
+                {"error": "Cannot delete lot with existing products. Delete the products first."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class PaymentViewSet(viewsets.ModelViewSet):
     queryset = Payment.objects.all()
@@ -156,10 +212,39 @@ class PaymentViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         try:
             serializer = self.get_serializer(data=request.data)
-            print(request.data)
             serializer.is_valid(raise_exception=True)
             self.perform_create(serializer)
             headers = self.get_success_headers(serializer.data)
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    def update(self, request, *args, **kwargs):
+        """
+        Update a payment and recalculate lot payment status.
+        """
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        # Update lot payment status
+        instance.lot.update_payment_status()
+        
+        return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Delete a payment and update the lot's payment status.
+        """
+        instance = self.get_object()
+        lot = instance.lot
+        
+        # Delete the payment
+        self.perform_destroy(instance)
+        
+        # Update lot payment status
+        lot.update_payment_status()
+        
+        return Response(status=status.HTTP_204_NO_CONTENT)
