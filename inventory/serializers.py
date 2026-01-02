@@ -7,6 +7,7 @@ import datetime
 class ProductSerializer(serializers.ModelSerializer):
     bought_at = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
+    lot_details = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -24,6 +25,19 @@ class ProductSerializer(serializers.ModelSerializer):
         """
         if obj.lot and obj.lot.bought_on:
             return obj.lot.bought_on.strftime("%d-%m-%Y")
+        return None
+
+    def get_lot_details(self, obj):
+        """
+        Get lot details including ID, name, supplier, and purchase date
+        """
+        if obj.lot:
+            return {
+                'id': obj.lot.id,
+                'name': obj.lot.title,
+                'supplier': obj.lot.bought_from,
+                'purchase_date': obj.lot.bought_on.strftime("%Y-%m-%d") if obj.lot.bought_on else None
+            }
         return None
 
     def get_status(self, obj):
