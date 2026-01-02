@@ -7,18 +7,21 @@ from django.db.models import Sum, F, ExpressionWrapper, DurationField, Count, Da
 from django.utils.timezone import now, make_aware
 from datetime import datetime, timedelta
 from django_filters import rest_framework as filters
+from django.db import transaction
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
+from expense.models import Expenses
 
 
 class SaleFilter(filters.FilterSet):
     start_date = filters.DateFilter(field_name='sale_date', lookup_expr='gte')
     end_date = filters.DateFilter(field_name='sale_date', lookup_expr='lte')
     shipping_status = filters.CharFilter(field_name='shipping_status')
+    is_refunded = filters.BooleanFilter(field_name='is_refunded')
 
     class Meta:
         model = Sale
-        fields = ['start_date', 'end_date', 'shipping_status']
+        fields = ['start_date', 'end_date', 'shipping_status', 'is_refunded']
 
 
 class SaleViewSet(viewsets.ModelViewSet):
@@ -271,6 +274,83 @@ class SaleViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response(
                 {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @extend_schema(
+        summary="Mark sale as refund",
+        description="Marks a sale as refunded. Restores product quantity and creates a refund expense.",
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'reason': {'type': 'string', 'description': 'Reason for refund'},
+                },
+                'example': {'reason': 'Customer returned - product defective'}
+            }
+        },
+        responses={200: {'description': 'Sale marked as refunded successfully'}},
+    )
+    @action(detail=True, methods=["post"])
+    def mark_as_refund(self, request, pk=None):
+        """
+        Mark a sale as refunded:
+        1. Restore product's available_quantity
+        2. Create a refund expense entry
+        3. Mark the sale as refunded (keeps the record)
+        """
+        try:
+            with transaction.atomic():
+                sale = self.get_object()
+                
+                # Check if already refunded
+                if sale.is_refunded:
+                    return Response(
+                        {"error": "This sale has already been refunded"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                product = sale.product
+                quantity_sold = sale.quantity_sold
+                refund_amount = sale.sale_price * quantity_sold
+                reason = request.data.get('reason', '')
+                
+                # 1. Restore product quantity
+                product.available_quantity += quantity_sold
+                product.save()
+                
+                # 2. Create refund expense (this will offset the sale in cashflow)
+                refund_expense = Expenses.objects.create(
+                    type=Expenses.ExpenseType.REFUND,
+                    amount=refund_amount,
+                    date=now().date(),
+                    description=f"Refund for Sale #{sale.id} - {product.name}. {reason}".strip(),
+                    sale=sale,
+                    product=product
+                )
+                
+                # 3. Mark sale as refunded
+                sale.is_refunded = True
+                sale.refunded_at = now()
+                sale.save()
+                
+                # Return success response
+                serializer = self.get_serializer(sale)
+                return Response({
+                    "message": "Sale marked as refunded successfully",
+                    "sale": serializer.data,
+                    "refund_expense": {
+                        "id": refund_expense.id,
+                        "amount": float(refund_expense.amount),
+                        "date": refund_expense.date.strftime("%Y-%m-%d"),
+                        "description": refund_expense.description
+                    },
+                    "product_quantity_restored": quantity_sold
+                }, status=status.HTTP_200_OK)
+                
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to process refund: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 

@@ -14,8 +14,8 @@ class SaleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Sale
-        fields = ('id', 'product', 'product_details', 'quantity_sold', 'sale_price', 'customer', 'sale_date', 'shipping_status', 'days_since_sale', 'created_at', 'updated_at')
-        read_only_fields = ('created_at', 'updated_at')
+        fields = ('id', 'product', 'product_details', 'quantity_sold', 'sale_price', 'customer', 'sale_date', 'shipping_status', 'is_refunded', 'refunded_at', 'days_since_sale', 'created_at', 'updated_at')
+        read_only_fields = ('is_refunded', 'refunded_at', 'created_at', 'updated_at')
         extra_kwargs = {
             'product': {'required': True},
             'quantity_sold': {'required': True},

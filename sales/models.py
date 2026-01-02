@@ -23,6 +23,8 @@ class Sale(BaseModel):
         blank=True
     )
     sale_date = models.DateTimeField()
+    is_refunded = models.BooleanField(default=False)
+    refunded_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return f"Sale of {self.product.name} on {self.sale_date}"
