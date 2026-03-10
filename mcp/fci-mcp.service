@@ -1,0 +1,31 @@
+[Unit]
+Description=FCI Stash MCP Server
+After=network.target
+# Start after the Django/gunicorn service if you have one named fci-django.service
+# After=network.target fci-django.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/stash-pro/mcp
+
+# Activate the virtualenv and run the server
+ExecStart=/home/ubuntu/stash-pro/mcp/.venv/bin/python /home/ubuntu/stash-pro/mcp/mcp_server.py
+
+# Restart policy
+Restart=always
+RestartSec=5
+
+# Environment (alternative to .env file — comment out if using .env)
+# Environment=DJANGO_BASE_URL=http://localhost:8000
+# Environment=MCP_API_KEY=your-secret-here
+
+# Load .env file via EnvironmentFile (requires key=value format, no export)
+EnvironmentFile=/home/ubuntu/stash-pro/mcp/.env
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fci-mcp
+
+[Install]
+WantedBy=multi-user.target
