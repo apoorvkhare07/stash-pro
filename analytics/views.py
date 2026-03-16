@@ -12,7 +12,7 @@ from drf_spectacular.types import OpenApiTypes
 
 
 class AnalyticsView(APIView):
-    # permission_classes = [IsAuthenticated]  # Optional: Restrict access to logged-in users
+    permission_classes = [IsAuthenticated]
 
     def get_date_range(self, duration):
         """Get the start and end dates based on the duration parameter"""
@@ -158,6 +158,27 @@ class AnalyticsView(APIView):
         # 5. Profit
         profit = sales - cogs
 
+        # 6. Top products by revenue (within date range)
+        top_products_qs = sales_queryset.values(
+            'product__id', 'product__name', 'product__price'
+        ).annotate(
+            revenue=Sum(F('quantity_sold') * F('sale_price')),
+            cogs=Sum(F('quantity_sold') * F('product__price')),
+            units_sold=Sum('quantity_sold'),
+        ).order_by('-revenue')[:5]
+
+        top_products = [
+            {
+                'id': p['product__id'],
+                'name': p['product__name'],
+                'revenue': float(p['revenue'] or 0),
+                'cogs': float(p['cogs'] or 0),
+                'profit': float((p['revenue'] or 0) - (p['cogs'] or 0)),
+                'units_sold': p['units_sold'],
+            }
+            for p in top_products_qs
+        ]
+
         # Prepare Response Data
         data = {
             "duration": duration if duration else "all",
@@ -170,6 +191,7 @@ class AnalyticsView(APIView):
             "profit": profit,
             "profit_margin": (profit / cogs if cogs else 0) * 100,
             "expenses": total_expenses,
+            "top_products": top_products,
         }
 
         return Response(data)

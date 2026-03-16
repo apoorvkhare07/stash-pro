@@ -6,6 +6,7 @@ from .serializers import ProductSerializer, LotSerializer, PaymentSerializer
 from rest_framework.response import Response
 from sales.models import Sale
 from django_filters import rest_framework as filters
+from rest_framework.filters import SearchFilter, OrderingFilter
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
@@ -50,8 +51,11 @@ class PaymentFilter(filters.FilterSet):
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
-    filter_backends = (filters.DjangoFilterBackend,)
+    filter_backends = (filters.DjangoFilterBackend, SearchFilter, OrderingFilter)
     filterset_class = ProductFilter
+    search_fields = ['name', 'specs']
+    ordering_fields = ['id', 'name', 'price', 'available_quantity', 'created_at']
+    ordering = ['id']
 
     def update(self, request, *args, **kwargs):
         """
@@ -170,8 +174,10 @@ class ProductViewSet(viewsets.ModelViewSet):
 class LotViewSet(viewsets.ModelViewSet):
     queryset = Lot.objects.all()
     serializer_class = LotSerializer
-    filter_backends = (filters.DjangoFilterBackend,)
+    filter_backends = (filters.DjangoFilterBackend, OrderingFilter)
     filterset_class = LotFilter
+    ordering_fields = ['id', 'bought_on', 'total_price']
+    ordering = ['-bought_on']
 
     def get_queryset(self):
         return Lot.objects.all().order_by('-bought_on')

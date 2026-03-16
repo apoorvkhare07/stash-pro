@@ -7,6 +7,7 @@ from django.db.models import Sum, F, ExpressionWrapper, DurationField, Count, Da
 from django.utils.timezone import now, make_aware
 from datetime import datetime, timedelta
 from django_filters import rest_framework as filters
+from rest_framework.filters import SearchFilter, OrderingFilter
 from django.db import transaction
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
@@ -27,8 +28,11 @@ class SaleFilter(filters.FilterSet):
 class SaleViewSet(viewsets.ModelViewSet):
     queryset = Sale.objects.all()
     serializer_class = SaleSerializer
-    filter_backends = (filters.DjangoFilterBackend,)
+    filter_backends = (filters.DjangoFilterBackend, SearchFilter, OrderingFilter)
     filterset_class = SaleFilter
+    search_fields = ['customer', 'product__name']
+    ordering_fields = ['id', 'sale_date', 'sale_price']
+    ordering = ['id']
 
     def destroy(self, request, *args, **kwargs):
         """

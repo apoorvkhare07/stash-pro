@@ -5,6 +5,7 @@ from django.db.models import Sum
 from .models import Expenses
 from .serializers import ExpensesSerializer
 from django_filters import rest_framework as filters
+from rest_framework.filters import SearchFilter, OrderingFilter
 from datetime import datetime
 from django.utils.timezone import make_aware, now
 from drf_spectacular.utils import extend_schema, OpenApiParameter
@@ -24,8 +25,11 @@ class ExpensesFilter(filters.FilterSet):
 class ExpensesViewSet(viewsets.ModelViewSet):
     queryset = Expenses.objects.all()
     serializer_class = ExpensesSerializer
-    filter_backends = (filters.DjangoFilterBackend,)
+    filter_backends = (filters.DjangoFilterBackend, SearchFilter, OrderingFilter)
     filterset_class = ExpensesFilter
+    search_fields = ['description', 'vendor']
+    ordering_fields = ['id', 'date', 'amount']
+    ordering = ['-date']
 
     def get_queryset(self):
         queryset = Expenses.objects.all()
