@@ -23,6 +23,9 @@ class Sale(BaseModel):
         blank=True
     )
     sale_date = models.DateTimeField()
+    shopify_order_id = models.CharField(max_length=64, null=True, blank=True)
+    shopify_order_name = models.CharField(max_length=64, null=True, blank=True)
+    tracking_number = models.CharField(max_length=128, null=True, blank=True)
     is_refunded = models.BooleanField(default=False)
     refunded_at = models.DateTimeField(null=True, blank=True)
 
