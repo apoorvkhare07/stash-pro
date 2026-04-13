@@ -183,7 +183,7 @@ class LotViewSet(viewsets.ModelViewSet):
     ordering = ['-bought_on']
 
     def get_queryset(self):
-        return Lot.objects.prefetch_related('payment_set', 'products').all().order_by('-bought_on')
+        return Lot.objects.prefetch_related('payments', 'products').all().order_by('-bought_on')
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
