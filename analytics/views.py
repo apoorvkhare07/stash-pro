@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from accounts.permissions import IsOwnerGroup
 from django.db.models import Sum, F
 from sales.models import Sale
 from expense.models import Expenses
@@ -12,7 +13,7 @@ from drf_spectacular.types import OpenApiTypes
 
 
 class AnalyticsView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsOwnerGroup]
 
     def get_date_range(self, duration):
         """Get the start and end dates based on the duration parameter"""

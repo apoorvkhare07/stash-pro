@@ -1,6 +1,6 @@
 import datetime
 from rest_framework.decorators import action
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, serializers
 from .models import Product, Lot, Payment
 from .serializers import ProductSerializer, LotSerializer, PaymentSerializer
 from rest_framework.response import Response
@@ -51,6 +51,9 @@ class PaymentFilter(filters.FilterSet):
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
+
+    def get_queryset(self):
+        return Product.objects.select_related('lot').all()
     filter_backends = (filters.DjangoFilterBackend, SearchFilter, OrderingFilter)
     filterset_class = ProductFilter
     search_fields = ['name', 'specs']
@@ -180,7 +183,7 @@ class LotViewSet(viewsets.ModelViewSet):
     ordering = ['-bought_on']
 
     def get_queryset(self):
-        return Lot.objects.all().order_by('-bought_on')
+        return Lot.objects.prefetch_related('payment_set', 'products').all().order_by('-bought_on')
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -222,8 +225,10 @@ class PaymentViewSet(viewsets.ModelViewSet):
             self.perform_create(serializer)
             headers = self.get_success_headers(serializer.data)
             return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except serializers.ValidationError:
+            raise
+        except Exception:
+            return Response({"error": "Failed to create payment"}, status=status.HTTP_400_BAD_REQUEST)
 
     def update(self, request, *args, **kwargs):
         """

@@ -61,9 +61,9 @@ class ExpensesViewSet(viewsets.ModelViewSet):
                 headers=headers
             )
             
-        except Exception as e:
+        except Exception:
             return Response(
-                {"error": f"Failed to create expense: {str(e)}"},
+                {"error": "Failed to create expense"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 

@@ -28,6 +28,9 @@ class SaleFilter(filters.FilterSet):
 class SaleViewSet(viewsets.ModelViewSet):
     queryset = Sale.objects.all()
     serializer_class = SaleSerializer
+
+    def get_queryset(self):
+        return Sale.objects.select_related('product').all()
     filter_backends = (filters.DjangoFilterBackend, SearchFilter, OrderingFilter)
     filterset_class = SaleFilter
     search_fields = ['customer', 'product__name']
@@ -275,9 +278,9 @@ class SaleViewSet(viewsets.ModelViewSet):
             serializer = self.get_serializer(sale)
             return Response(serializer.data, status=status.HTTP_200_OK)
             
-        except Exception as e:
+        except Exception:
             return Response(
-                {"error": str(e)},
+                {"error": "Failed to update shipping status"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -352,9 +355,9 @@ class SaleViewSet(viewsets.ModelViewSet):
                     "product_quantity_restored": quantity_sold
                 }, status=status.HTTP_200_OK)
                 
-        except Exception as e:
+        except Exception:
             return Response(
-                {"error": f"Failed to process refund: {str(e)}"},
+                {"error": "Failed to process refund"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
