@@ -188,6 +188,8 @@ def run_import():
     # ========== SALES ==========
     ws = wb['Sales']
     sales_created = 0
+    order_counter = {}  # track how many times we've seen each order_id
+
     for row in ws.iter_rows(min_row=2, values_only=True):
         if row[0] is None:
             break
@@ -198,7 +200,11 @@ def run_import():
         sale_price = Decimal(str(row[4])) if row[4] else Decimal('0')
         product_id_1 = int(row[5]) if row[5] else None
         product_id_2 = int(row[6]) if row[6] else None
-        cost_price = Decimal(str(row[12])) if row[12] else None
+
+        # Track duplicates for unique shopify_order_id
+        order_counter[order_id] = order_counter.get(order_id, 0) + 1
+        occurrence = order_counter[order_id]
+        unique_order_id = order_id if occurrence == 1 else f'{order_id}-{occurrence}'
 
         # Create sale for product 1
         product = product_cache.get(product_id_1)
@@ -206,22 +212,18 @@ def run_import():
             print(f'  WARN: Product {product_id_1} not found for sale {order_id}')
             continue
 
-        # Determine funded_by_user from product's lot
         funded_by_user = None
         if product.lot and product.lot.funded_by == 'user':
             funded_by_user = product.lot.funded_by_user
-
-        # For multi-product orders, split price evenly (or use cost as guide)
-        items_in_order = 1 + (1 if product_id_2 else 0)
 
         sale = Sale.objects.create(
             organization=org,
             product=product,
             quantity_sold=1,
-            sale_price=sale_price if items_in_order == 1 else sale_price,  # full price for single, will handle multi below
+            sale_price=sale_price,
             customer=customer_email or '',
             sale_date=sale_date,
-            shopify_order_id=order_id,
+            shopify_order_id=unique_order_id,
             shopify_order_name=order_id,
             shipping_status='shipped',
             funded_by_user=funded_by_user,
@@ -231,7 +233,7 @@ def run_import():
         sale.save()
         sales_created += 1
 
-        # Product 2 if exists (multi-product order)
+        # Product 2 in same row (second product column)
         if product_id_2:
             product2 = product_cache.get(product_id_2)
             if product2:
@@ -239,14 +241,17 @@ def run_import():
                 if product2.lot and product2.lot.funded_by == 'user':
                     funded_by_user2 = product2.lot.funded_by_user
 
+                order_counter[order_id] = order_counter.get(order_id, 0) + 1
+                unique_order_id2 = f'{order_id}-{order_counter[order_id]}'
+
                 sale2 = Sale.objects.create(
                     organization=org,
                     product=product2,
                     quantity_sold=1,
-                    sale_price=Decimal('0'),  # price is on the main order
+                    sale_price=Decimal('0'),
                     customer=customer_email or '',
                     sale_date=sale_date,
-                    shopify_order_id=f'{order_id}-2',  # suffix for uniqueness
+                    shopify_order_id=unique_order_id2,
                     shopify_order_name=order_id,
                     shipping_status='shipped',
                     funded_by_user=funded_by_user2,
