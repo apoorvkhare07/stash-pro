@@ -18,6 +18,7 @@ from django.db import transaction
 from sales.models import Sale, ShippingInfo
 from inventory.models import Product
 from accounts.models import Organization
+from accounts.mixins import resolve_org
 from .services import get_shopify_orders, fulfill_shopify_order
 
 logger = logging.getLogger(__name__)
@@ -295,7 +296,7 @@ class ShopifySyncStatusView(APIView):
     """Returns Shopify sync status - last synced order, unmatched items."""
 
     def get(self, request):
-        org = getattr(request, 'organization', None)
+        org, _ = resolve_org(request)
         qs = Sale.objects.filter(shopify_order_id__isnull=False)
         if org:
             qs = qs.filter(organization=org)

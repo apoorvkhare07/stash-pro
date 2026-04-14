@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from accounts.permissions import IsOwnerGroup
+from accounts.mixins import resolve_org
 from django.db.models import Sum, F
 from sales.models import Sale
 from expense.models import Expenses
@@ -115,7 +116,7 @@ class AnalyticsView(APIView):
             # If duration is invalid, we'll return all data (start_date and end_date stay None)
         
         # Build querysets with optional date filtering, scoped to org
-        org = getattr(request, 'organization', None)
+        org, _ = resolve_org(request)
         inventory_queryset = Product.objects.all()
         sales_queryset = Sale.objects.all()
         expenses_queryset = Expenses.objects.all()

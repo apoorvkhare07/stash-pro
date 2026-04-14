@@ -12,7 +12,7 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExampl
 from drf_spectacular.types import OpenApiTypes
 from rest_framework.permissions import IsAuthenticated
 from accounts.permissions import HasModelPermission, IsOwnerGroup
-from accounts.mixins import OrgQuerysetMixin
+from accounts.mixins import OrgQuerysetMixin, resolve_org
 from django.db import transaction
 
 
@@ -316,7 +316,7 @@ class BulkImportView(APIView):
 
     @transaction.atomic
     def post(self, request):
-        org = getattr(request, 'organization', None)
+        org, _ = resolve_org(self.request)
         lots_data = request.data.get('lots', [])
         sales_data = request.data.get('sales', [])
 

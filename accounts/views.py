@@ -7,6 +7,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from .models import Organization, UserOrganization
+from .mixins import resolve_org
 from .permissions import IsOwnerGroup
 from .serializers import (
     get_user_role, get_user_orgs,
@@ -40,8 +41,7 @@ class MeView(APIView):
 
     def get(self, request):
         user = request.user
-        org = getattr(request, 'organization', None)
-        org_role = getattr(request, 'org_role', None)
+        org, org_role = resolve_org(request)
         return Response({
             'id': user.id,
             'username': user.username,
@@ -95,12 +95,11 @@ class UserListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        org = getattr(request, 'organization', None)
+        org, org_role = resolve_org(request)
         if not org:
             return Response({'error': 'No organization selected'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Only org owners can manage users
-        if getattr(request, 'org_role', None) != 'owner':
+        if org_role != 'owner':
             return Response({'error': 'Only organization owners can manage users'}, status=status.HTTP_403_FORBIDDEN)
 
         memberships = UserOrganization.objects.filter(organization=org).select_related('user')
@@ -119,11 +118,11 @@ class UserListCreateView(APIView):
         return Response(users)
 
     def post(self, request):
-        org = getattr(request, 'organization', None)
+        org, org_role = resolve_org(request)
         if not org:
             return Response({'error': 'No organization selected'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if getattr(request, 'org_role', None) != 'owner':
+        if org_role != 'owner':
             return Response({'error': 'Only organization owners can create users'}, status=status.HTTP_403_FORBIDDEN)
 
         serializer = CreateUserSerializer(data=request.data)
@@ -146,8 +145,8 @@ class UserDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        org = getattr(request, 'organization', None)
-        if not org or getattr(request, 'org_role', None) != 'owner':
+        org, org_role = resolve_org(request)
+        if not org or org_role != 'owner':
             return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
@@ -163,8 +162,8 @@ class UserDetailView(APIView):
         })
 
     def put(self, request, pk):
-        org = getattr(request, 'organization', None)
-        if not org or getattr(request, 'org_role', None) != 'owner':
+        org, org_role = resolve_org(request)
+        if not org or org_role != 'owner':
             return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
@@ -198,8 +197,8 @@ class UserDetailView(APIView):
         })
 
     def delete(self, request, pk):
-        org = getattr(request, 'organization', None)
-        if not org or getattr(request, 'org_role', None) != 'owner':
+        org, org_role = resolve_org(request)
+        if not org or org_role != 'owner':
             return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
 
         if pk == request.user.id:
@@ -220,8 +219,8 @@ class ResetPasswordView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        org = getattr(request, 'organization', None)
-        if not org or getattr(request, 'org_role', None) != 'owner':
+        org, org_role = resolve_org(request)
+        if not org or org_role != 'owner':
             return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
