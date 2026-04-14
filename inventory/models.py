@@ -18,20 +18,35 @@ class Product(BaseModel):
 
     class Category(models.TextChoices):
         FILM_CAMERA = "Film Camera", _("Film Camera")
-        DIGIRAL_CAMERA = "Digital Camera", _("Digital Camera")
+        DIGITAL_CAMERA = "Digital Camera", _("Digital Camera")
         ACCESSORY = "Accessory", _("Accessory")
         FILM = "Film", _("Film")
 
     class SubCategory(models.TextChoices):
+        SLR_BODY = "SLR Body", _("SLR Body")
         SLR = "SLR", _("SLR")
         POINT_AND_SHOOT = "Point & Shoot", _("Point & Shoot")
-        MIRRORLESS = "Mirrorless", _("Mirrorless")
-        TRIPOD = "Tripod", _("Tripod")
-        LENS = "Lens", _("Lens")
-        FILM_ROLL = "Film Roll", _("Film Roll")
+        DIGICAM = "Digicam", _("Digicam")
         RANGEFINDER = "Rangefinder", _("Rangefinder")
         TLR = "TLR", _("TLR")
+        MIRRORLESS = "Mirrorless", _("Mirrorless")
+        DSLR_BODY = "DSLR Body", _("DSLR Body")
         HANDYCAM = "Handycam", _("Handycam")
+        LENS = "Lens", _("Lens")
+        LENS_ADAPTER = "Lens Adapter", _("Lens Adapter")
+        TELE_CONVERTER = "Tele Converter", _("Tele Converter")
+        FLASH = "Flash", _("Flash")
+        VIEWFINDER = "Viewfinder", _("Viewfinder")
+        SHUTTER_RELEASE = "Shutter Release cable", _("Shutter Release Cable")
+        EXPIRED_FILM = "Expired film", _("Expired Film")
+        FILM_ROLL = "Film Roll", _("Film Roll")
+        TRIPOD = "Tripod", _("Tripod")
+        OTHER = "Other", _("Other")
+
+    class ListingStatus(models.TextChoices):
+        LISTED = "Listed", _("Listed")
+        UNLISTED = "Unlisted", _("Unlisted")
+        SHIPPED = "Shipped", _("Shipped")
 
     class CosmeticCondition(models.TextChoices):
         EXCELLENT = "excellent", _("Excellent")
@@ -83,6 +98,13 @@ class Product(BaseModel):
     delivery_status = models.CharField(
         max_length=50,
         choices=DeliveryStatus.choices,
+        null=True,
+        blank=True
+    )
+    listing_status = models.CharField(
+        max_length=20,
+        choices=ListingStatus.choices,
+        default=ListingStatus.UNLISTED,
         null=True,
         blank=True
     )

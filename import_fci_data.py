@@ -21,46 +21,61 @@ from expense.models import Expenses
 XLSX_PATH = '/Users/apoorvkhare/Downloads/FCI Common.xlsx'
 
 # --- Mapping ---
-PRODUCT_TYPE_MAP = {
-    'SLR Body': ('Film Camera', 'SLR'),
-    'SLR': ('Film Camera', 'SLR'),
-    'Lens': ('Accessory', 'Lens'),
-    'Point & Shoot': ('Film Camera', 'Point & Shoot'),
-    'Digicam': ('Digital Camera', 'Point & Shoot'),
-    'Rangefinder': ('Film Camera', 'Rangefinder'),
-    'TLR': ('Film Camera', 'TLR'),
-    'Mirrorless': ('Digital Camera', 'Mirrorless'),
-    'DSLR Body': ('Digital Camera', 'SLR'),
-    'Handycam': ('Accessory', 'Handycam'),
-    'Flash': ('Accessory', None),
-    'Lens Adapter': ('Accessory', None),
-    'Tele Converter': ('Accessory', None),
-    'Other': ('Accessory', None),
-    'Expired film': ('Film', 'Film Roll'),
-    'P&S + Film': ('Film Camera', 'Point & Shoot'),
-    'Viewfinder': ('Accessory', None),
-    'Shutter Release cable': ('Accessory', None),
+PRODUCT_TYPE_TO_CATEGORY = {
+    'SLR Body': 'Film Camera',
+    'SLR': 'Film Camera',
+    'Point & Shoot': 'Film Camera',
+    'Rangefinder': 'Film Camera',
+    'TLR': 'Film Camera',
+    'P&S + Film': 'Film Camera',
+    'Digicam': 'Digital Camera',
+    'Mirrorless': 'Digital Camera',
+    'DSLR Body': 'Digital Camera',
+    'Handycam': 'Digital Camera',
+    'Lens': 'Accessory',
+    'Lens Adapter': 'Accessory',
+    'Tele Converter': 'Accessory',
+    'Flash': 'Accessory',
+    'Viewfinder': 'Accessory',
+    'Shutter Release cable': 'Accessory',
+    'Other': 'Accessory',
+    'Expired film': 'Film',
+}
+
+# Sub-category uses the sheet value directly — our enums now match
+SUBCATEGORY_MAP = {
+    'SLR': 'SLR',
+    'P&S + Film': 'Point & Shoot',
 }
 
 BUYER_MAP = {
     'Jayesh': 'jayesh',
-    'Khare': 'admin',  # you
+    'Khare': 'apoorv',
     'FCI': None,  # org-funded
+}
+
+USER_DEFAULTS = {
+    'jayesh': {'first_name': 'Jayesh', 'role': 'editor'},
+    'apoorv': {'first_name': 'Apoorv', 'last_name': 'Khare', 'role': 'owner'},
 }
 
 
 def get_or_create_user(username, org):
+    defaults = USER_DEFAULTS.get(username, {})
+    role = defaults.pop('role', 'editor')
     user, created = User.objects.get_or_create(
         username=username,
-        defaults={'is_active': True}
+        defaults={'is_active': True, **defaults}
     )
     if created:
         user.set_password('changeme123')
         user.save()
         print(f'  Created user: {username}')
+    else:
+        print(f'  Found existing user: {username} (id={user.id})')
     UserOrganization.objects.get_or_create(
         user=user, organization=org,
-        defaults={'role': 'editor'}
+        defaults={'role': role}
     )
     return user
 
@@ -85,6 +100,13 @@ def run_import():
 
     org = Organization.objects.get(slug='fci')
     print(f'Importing into org: {org.name} (id={org.id})')
+
+    # Clean up previous import
+    Sale.objects.filter(organization=org).delete()
+    Expenses.objects.filter(organization=org).delete()
+    Product.objects.filter(organization=org).delete()
+    Lot.objects.filter(organization=org).delete()
+    print('  Cleaned up previous FCI data')
 
     # Ensure users exist
     user_cache = {}
@@ -159,13 +181,11 @@ def run_import():
         sold = str(row[12]).strip().lower() == 'yes' if row[12] else False
         status = row[13]  # Listed, Unlisted, Shipped
 
-        category, sub_category = PRODUCT_TYPE_MAP.get(product_type, ('Accessory', None))
+        category = PRODUCT_TYPE_TO_CATEGORY.get(product_type, 'Accessory')
+        sub_category = SUBCATEGORY_MAP.get(product_type, product_type)  # use sheet value directly
 
-        # Determine available quantity
         available = 0 if sold else 1
-
-        # Map status to delivery_status
-        delivery_status = 'received'
+        listing_status = status if status in ('Listed', 'Unlisted', 'Shipped') else 'Unlisted'
 
         product = Product.objects.create(
             organization=org,
@@ -176,9 +196,10 @@ def run_import():
             available_quantity=available,
             category=category,
             sub_category=sub_category,
+            listing_status=listing_status,
             bought_from=source,
             bought_at=purchase_date,
-            delivery_status=delivery_status,
+            delivery_status='received',
             overall_condition=remarks or '',
         )
         product_cache[product_id] = product
