@@ -114,10 +114,15 @@ class AnalyticsView(APIView):
                 start_date, end_date = self.get_date_range(duration)
             # If duration is invalid, we'll return all data (start_date and end_date stay None)
         
-        # Build querysets with optional date filtering
+        # Build querysets with optional date filtering, scoped to org
+        org = getattr(request, 'organization', None)
         inventory_queryset = Product.objects.all()
         sales_queryset = Sale.objects.all()
         expenses_queryset = Expenses.objects.all()
+        if org:
+            inventory_queryset = inventory_queryset.filter(organization=org)
+            sales_queryset = sales_queryset.filter(organization=org)
+            expenses_queryset = expenses_queryset.filter(organization=org)
         
         # Apply date filters only if we have valid dates
         if start_date and end_date:
@@ -149,7 +154,10 @@ class AnalyticsView(APIView):
         )['total_cogs'] or 0
 
         # 3. Total Unsold Inventory (this doesn't change based on duration)
-        total_unsold_inventory = Product.objects.filter(available_quantity__gt=0).aggregate(
+        unsold_qs = Product.objects.filter(available_quantity__gt=0)
+        if org:
+            unsold_qs = unsold_qs.filter(organization=org)
+        total_unsold_inventory = unsold_qs.aggregate(
             total_value=Sum(F('available_quantity') * F('price'))
         )['total_value'] or 0
 

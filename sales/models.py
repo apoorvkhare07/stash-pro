@@ -3,6 +3,7 @@ from django.utils.translation import gettext_lazy as _
 
 from inventory.models import Product
 from inventory.models import BaseModel
+from accounts.models import Organization
 
 
 class Sale(BaseModel):
@@ -12,7 +13,8 @@ class Sale(BaseModel):
         SHIPPING_PLACED = "shipping_placed", _("Shipping Placed")
         SHIPPED = "shipped", _("Shipped")
 
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="sales")
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='sales', null=True)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="sales", null=True, blank=True)
     quantity_sold = models.PositiveIntegerField()
     sale_price = models.DecimalField(max_digits=10, decimal_places=2)
     customer = models.CharField(max_length=255, null=True, blank=True)
@@ -23,14 +25,15 @@ class Sale(BaseModel):
         blank=True
     )
     sale_date = models.DateTimeField()
-    shopify_order_id = models.CharField(max_length=64, null=True, blank=True)
+    shopify_order_id = models.CharField(max_length=64, null=True, blank=True, unique=True)
     shopify_order_name = models.CharField(max_length=64, null=True, blank=True)
     tracking_number = models.CharField(max_length=128, null=True, blank=True)
     is_refunded = models.BooleanField(default=False)
     refunded_at = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return f"Sale of {self.product.name} on {self.sale_date}"
+        product_name = self.product.name if self.product else 'Unmatched'
+        return f"Sale of {product_name} on {self.sale_date}"
 
 
 

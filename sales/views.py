@@ -12,6 +12,9 @@ from django.db import transaction
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 from expense.models import Expenses
+from rest_framework.permissions import IsAuthenticated
+from accounts.permissions import HasModelPermission
+from accounts.mixins import OrgQuerysetMixin
 
 
 class SaleFilter(filters.FilterSet):
@@ -25,12 +28,13 @@ class SaleFilter(filters.FilterSet):
         fields = ['start_date', 'end_date', 'shipping_status', 'is_refunded']
 
 
-class SaleViewSet(viewsets.ModelViewSet):
+class SaleViewSet(OrgQuerysetMixin, viewsets.ModelViewSet):
     queryset = Sale.objects.all()
     serializer_class = SaleSerializer
+    permission_classes = [IsAuthenticated, HasModelPermission]
 
     def get_queryset(self):
-        return Sale.objects.select_related('product').all()
+        return super().get_queryset().select_related('product')
     filter_backends = (filters.DjangoFilterBackend, SearchFilter, OrderingFilter)
     filterset_class = SaleFilter
     search_fields = ['customer', 'product__name']
@@ -367,6 +371,7 @@ class SaleViewSet(viewsets.ModelViewSet):
 class ShippingInfoViewSet(viewsets.ModelViewSet):
     queryset = ShippingInfo.objects.all()
     serializer_class = ShippingInfoSerializer
+    permission_classes = [IsAuthenticated, HasModelPermission]
 
     @action(detail=True, methods=["get"])
     def get_shipping_info(self, request, pk=None):

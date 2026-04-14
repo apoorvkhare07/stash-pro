@@ -1,6 +1,7 @@
 from django.db import models
 from django.db.models import Sum
 from django.utils.translation import gettext_lazy as _
+from accounts.models import Organization
 
 
 class BaseModel(models.Model):
@@ -88,6 +89,7 @@ class Product(BaseModel):
     bought_from = models.CharField(max_length=255, null=True, blank=True)
     bought_at = models.DateTimeField(null=True, blank=True)
     lot = models.ForeignKey('Lot', on_delete=models.SET_NULL, null=True, blank=True, related_name='products')
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='products', null=True)
 
     def __str__(self):
         return f"{self.name} ({self.category} - {self.bought_from or 'N/A'})"
@@ -99,6 +101,7 @@ class Lot(BaseModel):
         PARTIALLY_PAID = "partially_paid", _("Partially Paid")
         PAID = "paid", _("Paid")
 
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='lots', null=True)
     title = models.CharField(max_length=255)
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
     bought_on = models.DateField()

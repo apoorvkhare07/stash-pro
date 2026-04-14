@@ -10,6 +10,9 @@ from datetime import datetime
 from django.utils.timezone import make_aware, now
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
+from rest_framework.permissions import IsAuthenticated
+from accounts.permissions import HasModelPermission
+from accounts.mixins import OrgQuerysetMixin
 
 
 class ExpensesFilter(filters.FilterSet):
@@ -22,9 +25,10 @@ class ExpensesFilter(filters.FilterSet):
         fields = ['type', 'start_date', 'end_date']
 
 
-class ExpensesViewSet(viewsets.ModelViewSet):
+class ExpensesViewSet(OrgQuerysetMixin, viewsets.ModelViewSet):
     queryset = Expenses.objects.all()
     serializer_class = ExpensesSerializer
+    permission_classes = [IsAuthenticated, HasModelPermission]
     filter_backends = (filters.DjangoFilterBackend, SearchFilter, OrderingFilter)
     filterset_class = ExpensesFilter
     search_fields = ['description', 'vendor']
@@ -32,8 +36,7 @@ class ExpensesViewSet(viewsets.ModelViewSet):
     ordering = ['-date']
 
     def get_queryset(self):
-        queryset = Expenses.objects.all()
-        # Filter by type if provided
+        queryset = super().get_queryset()
         expense_type = self.request.query_params.get('type', None)
         if expense_type:
             queryset = queryset.filter(type=expense_type)

@@ -3,6 +3,7 @@ from django.utils.translation import gettext_lazy as _
 from inventory.models import Product
 from sales.models import Sale
 from inventory.models import BaseModel
+from accounts.models import Organization
 
 
 class Expenses(BaseModel):
@@ -12,6 +13,7 @@ class Expenses(BaseModel):
         SHIPPING = "shipping", _("Shipping")
         MISC = "misc", _("Miscellaneous")
 
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='expenses', null=True)
     type = models.CharField(
         max_length=50,
         choices=ExpenseType.choices
