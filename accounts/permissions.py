@@ -1,18 +1,16 @@
 from rest_framework.permissions import BasePermission
+from accounts.mixins import resolve_org
 
 
 class HasModelPermission(BasePermission):
-    """Check Django's built-in model permissions based on request method."""
+    """
+    Check permissions based on org role:
+    - owner: full access
+    - editor: full access
+    - viewer: read-only (GET, HEAD, OPTIONS)
+    """
 
-    METHOD_PERMISSION_MAP = {
-        'GET': 'view',
-        'HEAD': 'view',
-        'OPTIONS': 'view',
-        'POST': 'add',
-        'PUT': 'change',
-        'PATCH': 'change',
-        'DELETE': 'delete',
-    }
+    SAFE_METHODS = ('GET', 'HEAD', 'OPTIONS')
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
@@ -21,29 +19,28 @@ class HasModelPermission(BasePermission):
         if request.user.is_superuser:
             return True
 
-        model = getattr(view, 'queryset', None)
-        if model is not None:
-            model = model.model
+        _, org_role = resolve_org(request)
 
-        if model is None:
-            return True
-
-        action = self.METHOD_PERMISSION_MAP.get(request.method)
-        if action is None:
+        if not org_role:
             return False
 
-        app_label = model._meta.app_label
-        model_name = model._meta.model_name
-        perm = f'{app_label}.{action}_{model_name}'
-        return request.user.has_perm(perm)
+        if org_role in ('owner', 'editor'):
+            return True
+
+        if org_role == 'viewer' and request.method in self.SAFE_METHODS:
+            return True
+
+        return False
 
 
 class IsOwnerGroup(BasePermission):
-    """Only users in the 'Owner' group can access."""
+    """Only org owners can access."""
 
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
         if request.user.is_superuser:
             return True
-        return request.user.groups.filter(name='Owner').exists()
+
+        _, org_role = resolve_org(request)
+        return org_role == 'owner'
