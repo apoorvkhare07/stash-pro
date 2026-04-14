@@ -1,5 +1,6 @@
 from django.db import models
 from django.db.models import Sum
+from django.contrib.auth.models import User
 from django.utils.translation import gettext_lazy as _
 from accounts.models import Organization
 
@@ -101,7 +102,13 @@ class Lot(BaseModel):
         PARTIALLY_PAID = "partially_paid", _("Partially Paid")
         PAID = "paid", _("Paid")
 
+    class FundingSource(models.TextChoices):
+        ORG = "org", _("Organization")
+        USER = "user", _("Team Member")
+
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='lots', null=True)
+    funded_by = models.CharField(max_length=10, choices=FundingSource.choices, default=FundingSource.ORG)
+    funded_by_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='funded_lots')
     title = models.CharField(max_length=255)
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
     bought_on = models.DateField()

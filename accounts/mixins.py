@@ -1,4 +1,4 @@
-from accounts.models import UserOrganization
+from accounts.models import UserOrganization, AuditLog
 
 
 def resolve_org(request):
@@ -38,10 +38,44 @@ def resolve_org(request):
     return org, org_role
 
 
+def log_audit(request, action, instance, changes=None):
+    """Log an action to the audit trail."""
+    org, _ = resolve_org(request)
+    if not org:
+        return
+    AuditLog.objects.create(
+        organization=org,
+        user=request.user if request.user.is_authenticated else None,
+        action=action,
+        model_name=instance.__class__.__name__,
+        object_id=instance.pk,
+        object_repr=str(instance)[:255],
+        changes=changes or {},
+    )
+
+
+def get_model_changes(instance):
+    """Get changed fields by comparing with DB state."""
+    if not instance.pk:
+        return {}
+    try:
+        db_instance = instance.__class__.objects.get(pk=instance.pk)
+    except instance.__class__.DoesNotExist:
+        return {}
+    changes = {}
+    for field in instance._meta.fields:
+        name = field.name
+        old_val = getattr(db_instance, name)
+        new_val = getattr(instance, name)
+        if old_val != new_val:
+            changes[name] = {'old': str(old_val), 'new': str(new_val)}
+    return changes
+
+
 class OrgQuerysetMixin:
     """
-    Mixin for ViewSets that auto-filters querysets by the current organization
-    and injects organization on create.
+    Mixin for ViewSets that auto-filters querysets by the current organization,
+    injects organization on create, and logs all mutations to the audit trail.
     """
 
     def get_queryset(self):
@@ -53,7 +87,14 @@ class OrgQuerysetMixin:
 
     def perform_create(self, serializer):
         org, _ = resolve_org(self.request)
-        serializer.save(organization=org)
+        instance = serializer.save(organization=org)
+        log_audit(self.request, 'create', instance)
 
     def perform_update(self, serializer):
-        serializer.save()
+        changes = get_model_changes(serializer.instance)
+        instance = serializer.save()
+        log_audit(self.request, 'update', instance, changes)
+
+    def perform_destroy(self, instance):
+        log_audit(self.request, 'delete', instance)
+        super().perform_destroy(instance)

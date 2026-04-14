@@ -34,3 +34,25 @@ class UserOrganization(models.Model):
 
     def __str__(self):
         return f"{self.user.username} @ {self.organization.name} ({self.role})"
+
+
+class AuditLog(models.Model):
+    class Action(models.TextChoices):
+        CREATE = 'create', _('Create')
+        UPDATE = 'update', _('Update')
+        DELETE = 'delete', _('Delete')
+
+    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='audit_logs')
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='audit_logs')
+    action = models.CharField(max_length=10, choices=Action.choices)
+    model_name = models.CharField(max_length=100)
+    object_id = models.IntegerField(null=True)
+    object_repr = models.CharField(max_length=255, blank=True, default='')
+    changes = models.JSONField(default=dict, blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.user} {self.action} {self.model_name}#{self.object_id}"

@@ -123,11 +123,12 @@ class ProductTitleSerializer(serializers.ModelSerializer):
 class LotSerializer(serializers.ModelSerializer):
     products = ProductTitleSerializer(many=True, read_only=True)
     bought_on = serializers.DateField(format="%Y-%m-%d")
+    funded_by_user_name = serializers.CharField(source='funded_by_user.username', read_only=True, default=None)
 
     class Meta:
         model = Lot
         fields = "__all__"
-        read_only_fields = ('created_at', 'updated_at')
+        read_only_fields = ('created_at', 'updated_at', 'organization')
 
     def validate_total_price(self, value):
         if value is None:

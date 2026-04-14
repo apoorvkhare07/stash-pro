@@ -6,7 +6,7 @@ from rest_framework import status
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from .models import Organization, UserOrganization
+from .models import Organization, UserOrganization, AuditLog
 from .mixins import resolve_org
 from .permissions import IsOwnerGroup
 from .serializers import (
@@ -255,3 +255,58 @@ class OrganizationListCreateView(APIView):
         # Creator becomes owner
         UserOrganization.objects.create(user=request.user, organization=org, role='owner')
         return Response(OrgSerializer(org).data, status=status.HTTP_201_CREATED)
+
+
+class AuditLogView(APIView):
+    """View audit logs for the current organization."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        org, org_role = resolve_org(request)
+        if not org:
+            return Response({'error': 'No organization selected'}, status=status.HTTP_400_BAD_REQUEST)
+
+        qs = AuditLog.objects.filter(organization=org).select_related('user')
+
+        # Filters
+        user_id = request.query_params.get('user')
+        model_name = request.query_params.get('model')
+        action = request.query_params.get('action')
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        if user_id:
+            qs = qs.filter(user_id=user_id)
+        if model_name:
+            qs = qs.filter(model_name__iexact=model_name)
+        if action:
+            qs = qs.filter(action=action)
+        if start_date:
+            qs = qs.filter(timestamp__date__gte=start_date)
+        if end_date:
+            qs = qs.filter(timestamp__date__lte=end_date)
+
+        page = int(request.query_params.get('page', 1))
+        page_size = 50
+        offset = (page - 1) * page_size
+        total = qs.count()
+
+        logs = qs[offset:offset + page_size]
+        results = [
+            {
+                'id': log.id,
+                'user': log.user.username if log.user else None,
+                'user_id': log.user_id,
+                'action': log.action,
+                'model_name': log.model_name,
+                'object_id': log.object_id,
+                'object_repr': log.object_repr,
+                'changes': log.changes,
+                'timestamp': log.timestamp,
+            }
+            for log in logs
+        ]
+        return Response({
+            'count': total,
+            'results': results,
+        })

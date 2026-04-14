@@ -1,4 +1,5 @@
 from django.db import models
+from django.contrib.auth.models import User
 from django.utils.translation import gettext_lazy as _
 
 from inventory.models import Product
@@ -30,6 +31,27 @@ class Sale(BaseModel):
     tracking_number = models.CharField(max_length=128, null=True, blank=True)
     is_refunded = models.BooleanField(default=False)
     refunded_at = models.DateTimeField(null=True, blank=True)
+
+    # Revenue split fields
+    funded_by_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='funded_sales')
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    user_payout = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    org_revenue = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    def calculate_split(self):
+        """Calculate revenue split based on funding source."""
+        total = self.sale_price * self.quantity_sold
+        cp = self.cost_price or (self.product.price if self.product else 0)
+        self.cost_price = cp
+
+        if self.funded_by_user:
+            # User-funded: user gets cost price back, org gets margin
+            self.user_payout = cp * self.quantity_sold
+            self.org_revenue = total - self.user_payout
+        else:
+            # Org-funded: org gets everything
+            self.user_payout = 0
+            self.org_revenue = total
 
     def __str__(self):
         product_name = self.product.name if self.product else 'Unmatched'

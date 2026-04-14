@@ -5,10 +5,13 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from accounts.permissions import IsOwnerGroup
 from accounts.mixins import resolve_org
-from django.db.models import Sum, F
+from accounts.models import UserOrganization
+from django.db.models import Sum, F, Count, Q, Value, CharField
+from django.db.models.functions import TruncMonth, Coalesce
+from django.contrib.auth.models import User
 from sales.models import Sale
 from expense.models import Expenses
-from inventory.models import Product
+from inventory.models import Product, Lot
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 from drf_spectacular.types import OpenApiTypes
 
@@ -205,3 +208,170 @@ class AnalyticsView(APIView):
         }
 
         return Response(data)
+
+
+class UserAnalyticsView(APIView):
+    """Per-user analytics: who bought how much, monthly, payouts."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        org, _ = resolve_org(request)
+        if not org:
+            return Response({'error': 'No organization selected'}, status=400)
+
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        # Get all org members
+        memberships = UserOrganization.objects.filter(organization=org).select_related('user')
+
+        users_data = []
+        for m in memberships:
+            user = m.user
+
+            # Lots funded by this user
+            lots_qs = Lot.objects.filter(organization=org, funded_by='user', funded_by_user=user)
+            sales_qs = Sale.objects.filter(organization=org, funded_by_user=user, is_refunded=False)
+
+            if start_date:
+                lots_qs = lots_qs.filter(bought_on__gte=start_date)
+                sales_qs = sales_qs.filter(sale_date__date__gte=start_date)
+            if end_date:
+                lots_qs = lots_qs.filter(bought_on__lte=end_date)
+                sales_qs = sales_qs.filter(sale_date__date__lte=end_date)
+
+            lots_total = lots_qs.aggregate(total=Sum('total_price'))['total'] or 0
+            lots_count = lots_qs.count()
+            products_bought = Product.objects.filter(lot__in=lots_qs).count()
+
+            sales_agg = sales_qs.aggregate(
+                total_revenue=Sum(F('quantity_sold') * F('sale_price')),
+                total_payout=Sum('user_payout'),
+                total_org_revenue=Sum('org_revenue'),
+                units_sold=Sum('quantity_sold'),
+            )
+
+            # Monthly breakdown
+            monthly = sales_qs.annotate(
+                month=TruncMonth('sale_date')
+            ).values('month').annotate(
+                revenue=Sum(F('quantity_sold') * F('sale_price')),
+                payout=Sum('user_payout'),
+                org_share=Sum('org_revenue'),
+                units=Sum('quantity_sold'),
+            ).order_by('month')
+
+            users_data.append({
+                'user_id': user.id,
+                'username': user.username,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'role': m.role,
+                'investment': {
+                    'lots_count': lots_count,
+                    'lots_total': float(lots_total),
+                    'products_bought': products_bought,
+                },
+                'sales': {
+                    'total_revenue': float(sales_agg['total_revenue'] or 0),
+                    'total_payout': float(sales_agg['total_payout'] or 0),
+                    'total_org_revenue': float(sales_agg['total_org_revenue'] or 0),
+                    'units_sold': sales_agg['units_sold'] or 0,
+                },
+                'monthly': [
+                    {
+                        'month': m['month'].strftime('%Y-%m'),
+                        'revenue': float(m['revenue'] or 0),
+                        'payout': float(m['payout'] or 0),
+                        'org_share': float(m['org_share'] or 0),
+                        'units': m['units'] or 0,
+                    }
+                    for m in monthly
+                ],
+            })
+
+        return Response(users_data)
+
+
+class ProductAnalyticsView(APIView):
+    """Product analytics: top sellers, aging, categories, listed/unlisted."""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        org, _ = resolve_org(request)
+        if not org:
+            return Response({'error': 'No organization selected'}, status=400)
+
+        products = Product.objects.filter(organization=org)
+        sales = Sale.objects.filter(organization=org, is_refunded=False)
+
+        # Category breakdown
+        by_category = products.values('category').annotate(
+            total=Count('id'),
+            available=Count('id', filter=Q(available_quantity__gt=0)),
+            sold=Count('id', filter=Q(available_quantity=0)),
+            total_value=Sum(F('available_quantity') * F('price')),
+        ).order_by('-total')
+
+        # Sub-category breakdown
+        by_subcategory = products.values('sub_category').annotate(
+            total=Count('id'),
+            available=Count('id', filter=Q(available_quantity__gt=0)),
+            sold=Count('id', filter=Q(available_quantity=0)),
+        ).order_by('-total')
+
+        # Top selling products (by units)
+        top_sellers = sales.values(
+            'product__id', 'product__name', 'product__category', 'product__price'
+        ).annotate(
+            units_sold=Sum('quantity_sold'),
+            revenue=Sum(F('quantity_sold') * F('sale_price')),
+        ).order_by('-units_sold')[:10]
+
+        # Aging inventory: available products grouped by age
+        today = now().date()
+        aging = {
+            '0_30': products.filter(available_quantity__gt=0, created_at__date__gte=today - timedelta(days=30)).count(),
+            '31_60': products.filter(available_quantity__gt=0, created_at__date__gte=today - timedelta(days=60), created_at__date__lt=today - timedelta(days=30)).count(),
+            '61_90': products.filter(available_quantity__gt=0, created_at__date__gte=today - timedelta(days=90), created_at__date__lt=today - timedelta(days=60)).count(),
+            '90_plus': products.filter(available_quantity__gt=0, created_at__date__lt=today - timedelta(days=90)).count(),
+        }
+
+        # Slow movers: available products older than 60 days with no sales
+        slow_movers = products.filter(
+            available_quantity__gt=0,
+            created_at__date__lt=today - timedelta(days=60),
+        ).exclude(
+            sales__isnull=False, sales__is_refunded=False
+        ).values('id', 'name', 'price', 'category', 'created_at')[:20]
+
+        # Summary
+        total_products = products.count()
+        available = products.filter(available_quantity__gt=0).count()
+        sold = products.filter(available_quantity=0).count()
+        total_inventory_value = products.filter(available_quantity__gt=0).aggregate(
+            val=Sum(F('available_quantity') * F('price'))
+        )['val'] or 0
+
+        # Monthly sales trend by category
+        monthly_by_category = sales.annotate(
+            month=TruncMonth('sale_date')
+        ).values('month', 'product__category').annotate(
+            units=Sum('quantity_sold'),
+            revenue=Sum(F('quantity_sold') * F('sale_price')),
+        ).order_by('month')
+
+        return Response({
+            'summary': {
+                'total_products': total_products,
+                'available': available,
+                'sold': sold,
+                'inventory_value': float(total_inventory_value),
+            },
+            'by_category': list(by_category),
+            'by_subcategory': list(by_subcategory),
+            'top_sellers': list(top_sellers),
+            'aging': aging,
+            'slow_movers': list(slow_movers),
+            'monthly_by_category': list(monthly_by_category),
+        })

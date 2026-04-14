@@ -12,10 +12,12 @@ class SaleSerializer(serializers.ModelSerializer):
     product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
     days_since_sale = serializers.SerializerMethodField()
 
+    funded_by_user_name = serializers.CharField(source='funded_by_user.username', read_only=True, default=None)
+
     class Meta:
         model = Sale
-        fields = ('id', 'product', 'product_details', 'quantity_sold', 'sale_price', 'customer', 'sale_date', 'shipping_status', 'shopify_order_id', 'shopify_order_name', 'tracking_number', 'is_refunded', 'refunded_at', 'days_since_sale', 'created_at', 'updated_at')
-        read_only_fields = ('is_refunded', 'refunded_at', 'created_at', 'updated_at')
+        fields = ('id', 'product', 'product_details', 'quantity_sold', 'sale_price', 'customer', 'sale_date', 'shipping_status', 'shopify_order_id', 'shopify_order_name', 'tracking_number', 'is_refunded', 'refunded_at', 'days_since_sale', 'funded_by_user', 'funded_by_user_name', 'cost_price', 'user_payout', 'org_revenue', 'created_at', 'updated_at')
+        read_only_fields = ('is_refunded', 'refunded_at', 'user_payout', 'org_revenue', 'cost_price', 'funded_by_user', 'funded_by_user_name', 'created_at', 'updated_at')
         extra_kwargs = {
             'product': {'required': True},
             'quantity_sold': {'required': True},
@@ -98,14 +100,19 @@ class SaleSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         with transaction.atomic():
-            # Get product and quantity from validated data
             product = validated_data.get('product')
             quantity_sold = validated_data.get('quantity_sold')
 
-            # Create the sale object
+            # Auto-populate funded_by_user from product's lot
+            if product and product.lot and product.lot.funded_by == 'user' and product.lot.funded_by_user:
+                validated_data['funded_by_user'] = product.lot.funded_by_user
+
             sale = Sale.objects.create(**validated_data)
 
-            # Update product's available quantity
+            # Calculate revenue split
+            sale.calculate_split()
+            sale.save()
+
             product.available_quantity -= quantity_sold
             product.save()
 
