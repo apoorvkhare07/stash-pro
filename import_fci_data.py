@@ -246,7 +246,7 @@ def run_import():
                     sale_price=Decimal('0'),  # price is on the main order
                     customer=customer_email or '',
                     sale_date=sale_date,
-                    shopify_order_id=None,  # can't have duplicate
+                    shopify_order_id=f'{order_id}-2',  # suffix for uniqueness
                     shopify_order_name=order_id,
                     shipping_status='shipped',
                     funded_by_user=funded_by_user2,
