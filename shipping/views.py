@@ -1,13 +1,7 @@
 import os
-import hmac
-import hashlib
-import base64
-import json
 import logging
 
 from django.http import HttpResponse, HttpResponseRedirect
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
 import requests
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -17,7 +11,6 @@ from django.db import transaction
 
 from sales.models import Sale, ShippingInfo
 from inventory.models import Product
-from accounts.models import Organization
 from accounts.mixins import resolve_org
 from .services import get_shopify_orders, fulfill_shopify_order
 
@@ -97,7 +90,6 @@ class FulfillOrderView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Update sale shipping status
         try:
             sale = Sale.objects.get(id=sale_id)
             sale.shipping_status = Sale.ShippingStatus.SHIPPING_PLACED
@@ -105,7 +97,6 @@ class FulfillOrderView(APIView):
         except Sale.DoesNotExist:
             return Response({'error': 'Sale not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Fulfill on Shopify
         try:
             fulfillment = fulfill_shopify_order(shopify_order_id, tracking_number)
             return Response({
@@ -117,224 +108,220 @@ class FulfillOrderView(APIView):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def verify_shopify_webhook(request, secret=None):
-    """Verify Shopify webhook HMAC signature."""
-    if not secret:
-        secret = os.getenv('SHOPIFY_WEBHOOK_SECRET', '')
-    if not secret:
-        return False
-    hmac_header = request.META.get('HTTP_X_SHOPIFY_HMAC_SHA256', '')
-    digest = hmac.new(
-        secret.encode('utf-8'),
-        request.body,
-        hashlib.sha256
-    ).digest()
-    computed_hmac = base64.b64encode(digest).decode('utf-8')
-    return hmac.compare_digest(computed_hmac, hmac_header)
-
-
-def resolve_webhook_org(request, org_slug):
-    """Resolve org from webhook URL slug. Returns (org, error_response)."""
-    try:
-        org = Organization.objects.get(slug=org_slug)
-    except Organization.DoesNotExist:
-        return None, Response({'error': 'Unknown organization'}, status=status.HTTP_404_NOT_FOUND)
-
-    # Verify HMAC with org-specific secret, fallback to env var
-    secret = org.shopify_webhook_secret or os.getenv('SHOPIFY_WEBHOOK_SECRET', '')
-    if secret and not verify_shopify_webhook(request, secret):
-        logger.warning(f"Shopify webhook HMAC verification failed for org {org_slug}")
-        return None, Response({'error': 'Invalid signature'}, status=status.HTTP_401_UNAUTHORIZED)
-
-    return org, None
-
-
-@method_decorator(csrf_exempt, name='dispatch')
-class ShopifyWebhookOrderCreateView(APIView):
+class ShopifySyncView(APIView):
     """
-    Receives Shopify orders/create webhook.
-    Auto-creates Sale records and decrements inventory.
+    Pull-based Shopify sync.
+    GET: Fetch Shopify orders not yet in StashPro, with suggested product matches.
+    POST: Confirm mappings and create Sale records.
     """
-    permission_classes = [AllowAny]
-    authentication_classes = []
-
-    def post(self, request, org_slug):
-        org, err = resolve_webhook_org(request, org_slug)
-        if err:
-            return err
-
-        try:
-            order = request.data
-        except Exception:
-            return Response({'error': 'Invalid JSON'}, status=status.HTTP_400_BAD_REQUEST)
-
-        shopify_order_id = str(order.get('id', ''))
-        order_name = order.get('name', '')
-
-        # Idempotency check
-        if Sale.objects.filter(shopify_order_id=shopify_order_id).exists():
-            return Response({'status': 'already_processed'}, status=status.HTTP_200_OK)
-
-        line_items = order.get('line_items', [])
-        shipping_address = order.get('shipping_address') or {}
-        customer_name = f"{shipping_address.get('first_name', '')} {shipping_address.get('last_name', '')}".strip()
-        customer_email = order.get('email', '')
-        customer_phone = shipping_address.get('phone', '') or order.get('phone', '')
-
-        created_sales = []
-        unmatched_items = []
-
-        with transaction.atomic():
-            for item in line_items:
-                item_name = item.get('title', '')
-                item_sku = item.get('sku', '')
-                quantity = item.get('quantity', 1)
-                price = item.get('price', '0')
-
-                # Match product within this org
-                product = None
-                org_products = Product.objects.filter(organization=org)
-                if item_sku:
-                    product = org_products.filter(name__iexact=item_sku).first()
-                if not product:
-                    product = org_products.filter(name__iexact=item_name).first()
-                if not product:
-                    product = org_products.filter(name__icontains=item_name).first()
-
-                sale = Sale.objects.create(
-                    organization=org,
-                    product=product,
-                    quantity_sold=quantity,
-                    sale_price=price,
-                    customer=customer_name or None,
-                    sale_date=order.get('created_at'),
-                    shopify_order_id=shopify_order_id,
-                    shopify_order_name=order_name,
-                    shipping_status=Sale.ShippingStatus.SHIPPING_PENDING,
-                )
-
-                if product:
-                    product.available_quantity = max(0, product.available_quantity - quantity)
-                    product.save()
-                    created_sales.append(sale.id)
-                else:
-                    unmatched_items.append({
-                        'sale_id': sale.id,
-                        'item_name': item_name,
-                        'item_sku': item_sku,
-                    })
-                    logger.warning(f"Unmatched Shopify line item: {item_name} (SKU: {item_sku}) in order {order_name}")
-
-                if shipping_address.get('address1'):
-                    address_parts = [
-                        shipping_address.get('address1', ''),
-                        shipping_address.get('address2', ''),
-                        shipping_address.get('city', ''),
-                        shipping_address.get('province', ''),
-                    ]
-                    ShippingInfo.objects.create(
-                        sale=sale,
-                        customer_name=customer_name,
-                        customer_email=customer_email,
-                        customer_phone=customer_phone,
-                        customer_address=', '.join(p for p in address_parts if p),
-                        customer_pincode=shipping_address.get('zip', ''),
-                    )
-
-        return Response({
-            'status': 'processed',
-            'order_name': order_name,
-            'sales_created': len(created_sales),
-            'unmatched_items': unmatched_items,
-        }, status=status.HTTP_201_CREATED)
-
-
-@method_decorator(csrf_exempt, name='dispatch')
-class ShopifyWebhookOrderUpdateView(APIView):
-    """Receives Shopify orders/updated webhook for status changes."""
-    permission_classes = [AllowAny]
-    authentication_classes = []
-
-    def post(self, request, org_slug):
-        org, err = resolve_webhook_org(request, org_slug)
-        if err:
-            return err
-
-        order = request.data
-        shopify_order_id = str(order.get('id', ''))
-
-        sales = Sale.objects.filter(shopify_order_id=shopify_order_id, organization=org)
-        if not sales.exists():
-            return Response({'status': 'no_matching_sales'}, status=status.HTTP_200_OK)
-
-        if order.get('cancelled_at'):
-            with transaction.atomic():
-                for sale in sales:
-                    if not sale.is_refunded and sale.product:
-                        sale.product.available_quantity += sale.quantity_sold
-                        sale.product.save()
-                    sale.is_refunded = True
-                    sale.refunded_at = order['cancelled_at']
-                    sale.save()
-            return Response({'status': 'cancelled', 'sales_updated': sales.count()})
-
-        fulfillment_status = order.get('fulfillment_status', '')
-        if fulfillment_status == 'fulfilled':
-            tracking = ''
-            fulfillments = order.get('fulfillments', [])
-            if fulfillments:
-                tracking = fulfillments[0].get('tracking_number', '')
-            sales.update(
-                shipping_status=Sale.ShippingStatus.SHIPPED,
-                tracking_number=tracking,
-            )
-
-        return Response({'status': 'updated'}, status=status.HTTP_200_OK)
-
-
-class ShopifySyncStatusView(APIView):
-    """Returns Shopify sync status - last synced order, unmatched items."""
 
     def get(self, request):
+        """Fetch new Shopify orders and suggest product matches."""
         org, _ = resolve_org(request)
-        qs = Sale.objects.filter(shopify_order_id__isnull=False)
-        if org:
-            qs = qs.filter(organization=org)
+        if not org:
+            return Response({'error': 'No organization selected'}, status=status.HTTP_400_BAD_REQUEST)
 
-        last_synced = qs.order_by('-created_at').first()
+        try:
+            shopify_orders = get_shopify_orders()
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        unmatched_sales = qs.filter(product__isnull=True).values(
-            'id', 'shopify_order_name', 'customer', 'sale_price', 'sale_date'
+        # Find which orders are already synced
+        existing_order_ids = set(
+            Sale.objects.filter(organization=org, shopify_order_id__isnull=False)
+            .values_list('shopify_order_id', flat=True)
         )
 
+        org_products = Product.objects.filter(organization=org, available_quantity__gt=0)
+
+        pending_orders = []
+        for order in shopify_orders:
+            order_id = str(order['id'])
+            if order_id in existing_order_ids:
+                continue
+
+            # Try to match each line item to a product
+            items_with_matches = []
+            for item in order.get('items', []):
+                item_name = item.get('name', '')
+                suggested_product = None
+                suggestions = []
+
+                # Exact match
+                exact = org_products.filter(name__iexact=item_name).first()
+                if exact:
+                    suggested_product = {'id': exact.id, 'name': exact.name, 'price': float(exact.price)}
+
+                # Fuzzy matches for suggestions
+                fuzzy = org_products.filter(name__icontains=item_name.split(' ')[0])[:5]
+                suggestions = [{'id': p.id, 'name': p.name, 'price': float(p.price)} for p in fuzzy]
+
+                items_with_matches.append({
+                    'shopify_item_name': item_name,
+                    'quantity': item.get('quantity', 1),
+                    'suggested_product': suggested_product,
+                    'suggestions': suggestions,
+                })
+
+            pending_orders.append({
+                'shopify_order_id': order_id,
+                'order_name': order['name'],
+                'created_at': order['created_at'],
+                'customer_name': order['customer_name'],
+                'total_price': order['total_price'],
+                'items': items_with_matches,
+            })
+
+        # Also return sync status
+        last_synced = Sale.objects.filter(
+            organization=org, shopify_order_id__isnull=False
+        ).order_by('-created_at').first()
+
+        unmatched = Sale.objects.filter(
+            organization=org, shopify_order_id__isnull=False, product__isnull=True
+        ).values('id', 'shopify_order_name', 'customer', 'sale_price', 'sale_date')
+
         return Response({
+            'pending_orders': pending_orders,
+            'pending_count': len(pending_orders),
             'last_synced_at': last_synced.created_at if last_synced else None,
             'last_order_name': last_synced.shopify_order_name if last_synced else None,
-            'unmatched_count': unmatched_sales.count(),
-            'unmatched_sales': list(unmatched_sales),
+            'unmatched_count': unmatched.count(),
+            'unmatched_sales': list(unmatched),
         })
+
+    def post(self, request):
+        """
+        Confirm product mappings and create sales.
+        Expected body:
+        {
+            "orders": [
+                {
+                    "shopify_order_id": "123",
+                    "order_name": "#1001",
+                    "customer": "john@example.com",
+                    "sale_date": "2026-04-01T12:00:00",
+                    "items": [
+                        {
+                            "product_id": 45,       // mapped product (null if skipping)
+                            "sale_price": 5000,
+                            "quantity": 1
+                        }
+                    ]
+                }
+            ]
+        }
+        """
+        org, _ = resolve_org(request)
+        if not org:
+            return Response({'error': 'No organization selected'}, status=status.HTTP_400_BAD_REQUEST)
+
+        orders_data = request.data.get('orders', [])
+        created_sales = 0
+        skipped = 0
+        errors = []
+
+        for order in orders_data:
+            shopify_order_id = str(order.get('shopify_order_id', ''))
+            order_name = order.get('order_name', '')
+
+            # Idempotency
+            if Sale.objects.filter(shopify_order_id=shopify_order_id).exists():
+                skipped += 1
+                continue
+
+            items = order.get('items', [])
+            for i, item in enumerate(items):
+                product_id = item.get('product_id')
+                sale_price = item.get('sale_price', 0)
+                quantity = item.get('quantity', 1)
+
+                product = None
+                if product_id:
+                    try:
+                        product = Product.objects.get(id=product_id, organization=org)
+                    except Product.DoesNotExist:
+                        errors.append(f"Product {product_id} not found for order {order_name}")
+                        continue
+
+                # Unique order ID for multi-item orders
+                unique_id = shopify_order_id if i == 0 else f"{shopify_order_id}-{i+1}"
+
+                try:
+                    with transaction.atomic():
+                        # Determine funded_by_user from product's lot
+                        funded_by_user = None
+                        if product and product.lot and product.lot.funded_by == 'user':
+                            funded_by_user = product.lot.funded_by_user
+
+                        sale = Sale.objects.create(
+                            organization=org,
+                            product=product,
+                            quantity_sold=quantity,
+                            sale_price=sale_price,
+                            customer=order.get('customer', ''),
+                            sale_date=order.get('sale_date'),
+                            shopify_order_id=unique_id,
+                            shopify_order_name=order_name,
+                            shipping_status=Sale.ShippingStatus.SHIPPING_PENDING,
+                            funded_by_user=funded_by_user,
+                            cost_price=product.price if product else None,
+                        )
+                        sale.calculate_split()
+                        sale.save()
+
+                        if product:
+                            product.available_quantity = max(0, product.available_quantity - quantity)
+                            product.save()
+
+                        # Create shipping info if available
+                        customer_name = order.get('customer_name', '')
+                        address = order.get('address', '')
+                        if customer_name:
+                            ShippingInfo.objects.create(
+                                sale=sale,
+                                customer_name=customer_name,
+                                customer_email=order.get('customer', ''),
+                                customer_phone=order.get('phone', ''),
+                                customer_address=address,
+                                customer_pincode=order.get('pincode', ''),
+                            )
+
+                        created_sales += 1
+                except Exception as e:
+                    errors.append(f"Order {order_name} item {i}: {str(e)}")
+
+        return Response({
+            'created_sales': created_sales,
+            'skipped': skipped,
+            'errors': errors,
+        }, status=status.HTTP_201_CREATED if created_sales > 0 else status.HTTP_200_OK)
 
 
 class ResolveUnmatchedSaleView(APIView):
     """Manually match an unmatched sale to a product."""
 
     def post(self, request, sale_id):
+        org, _ = resolve_org(request)
         product_id = request.data.get('product_id')
         if not product_id:
             return Response({'error': 'product_id is required'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            sale = Sale.objects.get(id=sale_id, product__isnull=True)
+            sale = Sale.objects.get(id=sale_id, product__isnull=True, organization=org)
         except Sale.DoesNotExist:
             return Response({'error': 'Unmatched sale not found'}, status=status.HTTP_404_NOT_FOUND)
 
         try:
-            product = Product.objects.get(id=product_id)
+            product = Product.objects.get(id=product_id, organization=org)
         except Product.DoesNotExist:
             return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
 
         with transaction.atomic():
             sale.product = product
+            sale.funded_by_user = product.lot.funded_by_user if product.lot and product.lot.funded_by == 'user' else None
+            sale.cost_price = product.price
+            sale.calculate_split()
             sale.save()
             product.available_quantity = max(0, product.available_quantity - sale.quantity_sold)
             product.save()
