@@ -19,15 +19,29 @@ def get_shopify_orders():
     if not store or not token:
         raise ValueError("SHOPIFY_STORE and SHOPIFY_ACCESS_TOKEN must be set in .env")
 
-    response = requests.get(
-        _shopify_url('orders.json'),
-        params={'status': 'open', 'fulfillment_status': 'unfulfilled', 'limit': 250},
-        headers=_shopify_headers(),
-        timeout=30,
-    )
-    response.raise_for_status()
-    orders = response.json().get('orders', [])
-    return [_clean_order(o) for o in orders]
+    all_orders = []
+    url = _shopify_url('orders.json')
+    params = {'status': 'any', 'limit': 250}
+
+    while url:
+        response = requests.get(
+            url,
+            params=params if not all_orders else None,
+            headers=_shopify_headers(),
+            timeout=30,
+        )
+        response.raise_for_status()
+        all_orders.extend(response.json().get('orders', []))
+
+        # Parse Link header for cursor-based pagination
+        url = None
+        link = response.headers.get('Link', '')
+        for part in link.split(','):
+            if 'rel="next"' in part:
+                url = part[part.find('<') + 1:part.find('>')]
+                break
+
+    return [_clean_order(o) for o in all_orders]
 
 
 def _clean_order(order):
